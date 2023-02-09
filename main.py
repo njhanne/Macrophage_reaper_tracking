@@ -4,7 +4,11 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from tifffile import imread
-from pytrackmate import trackmate_peak_import # if this isn't working check the version vs github version...
+# from pytrackmate import trackmate_peak_import # if this isn't working check the version vs github version...
+import sys
+sys.path.append("./DirFileHelpers")
+from trackmatexml import TrackmateXML # I didn't make this!
+# requires lxml and (from pip) version-parser
 
 import tkinter as tk
 from tkinter import filedialog
@@ -46,15 +50,65 @@ def find_touching_cells(mask, connectivity = 2):
 
 # End Neighbor Helpers
 
+
+def get_all_tracks(tmxml, id_range=[], duplicate_split=False, break_split=False):
+  all_tracks = defaultdict(list)
+  if len(id_range) != 0:
+    for i in id_range:
+      all_tracks[i].append(tmxml.analysetrackid(i, duplicate_split, break_split))
+      all_tracks[i].append()
+  else:
+    for i in range(len(tmxml.tracknames)):
+      all_tracks[i].append(tmxml.analysetrackid(i, duplicate_split, break_split))
+  return all_tracks
+
 # image_path = filedialog.askopenfilename(title='Select directory of your images to be segmented')
 #
 # label_mask = imread(image_path)
 # touching_cells = find_neighbors(label_mask, 2)
 
 xml_track_path = filedialog.askopenfilename(title='Select directory of your images to be segmented')
+tmxml = TrackmateXML()
+tmxml.loadfile(xml_track_path)
 
-spots = trackmate_peak_import(xml_track_path) # unfortunately I think this is deprecated
-spots.head()
+print(f"the tracknames:{tmxml.tracknames}")
+print(" ")
+print(f"the spotheader:{tmxml.spotheader}")
+
+# trackname = 'Track_0'
+# tracks = tmxml.analysetrack(trackname, duplicate_split=False, break_split=True)
+
+trackid_range = []
+# tracks = tmxml.analysetrackid(trackid, duplicate_split=False, break_split=True)
+all_tracks = get_all_tracks(tmxml, trackid_range, duplicate_split=False, break_split=True)
+
+propertyname = 'MEAN_INTENSITY_CH1'
+
+intensities = []
+frames = []
+for tracks in all_tracks:
+  intensities[tracks] = [tmxml.getproperty(track['spotids'], propertyname) for track in all_tracks[tracks]]
+  frames[tracks] = [tmxml.getproperty(track['spotids'], 'FRAME') for track in all_tracks[tracks]]
+
+for track in range(len(all_tracks)):
+  for i in range(len(frames[track])):
+    plt.plot(frames[track][i], intensities[track][i]) #, label='Cell ' + str(tracks[i]['cell']) + ' ; Child of '+str(tracks[i]['parent']))
+plt.xlabel('frame')
+plt.ylabel(propertyname)
+plt.legend()
+# plt.title(trackid)
+
+
+
+fig, axs = plt.subplots(len(frames),1)
+fig.set_size_inches(5,15)
+for i in range(len(frames)):
+    axs[i].plot(frames[i], intensities[i], label='Cell ' + str(tracks[i]['cell']) + ' ; Child of '+str(tracks[i]['parent']))
+    axs[i].set_xlabel('frame')
+    axs[i].set_ylabel(propertyname)
+    axs[i].legend()
+    # axs[i].set_title(trackname)
+
 
 
 print('hello')
