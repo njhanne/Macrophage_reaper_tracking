@@ -50,7 +50,7 @@ def find_touching_cells(mask, connectivity = 2):
 
 # End Neighbor Helpers
 
-
+# xml Helpers
 def get_all_tracks(tmxml, id_range=[], duplicate_split=False, break_split=False):
   all_tracks = defaultdict(list)
   if len(id_range) != 0:
@@ -62,14 +62,39 @@ def get_all_tracks(tmxml, id_range=[], duplicate_split=False, break_split=False)
       all_tracks[i].extend(tmxml.analysetrackid(i, duplicate_split, break_split))
   return all_tracks
 
-# image_path = filedialog.askopenfilename(title='Select directory of your images to be segmented')
-#
-# label_mask = imread(image_path)
-# touching_cells = find_neighbors(label_mask, 2)
 
+def find_cells_greater_than_prop(tmxml, apoptosis_propertyname, limit):
+
+  return cells
+
+# End xml Helpers
+
+### MAIN ###
+# import label mask
+image_path = filedialog.askopenfilename(title='Select directory of your images to be segmented')
+label_mask = imread(image_path)
+
+# import xml
 xml_track_path = filedialog.askopenfilename(title='Select directory of your images to be segmented')
 tmxml = TrackmateXML()
 tmxml.loadfile(xml_track_path)
+
+# find touching cells
+touching_cells = find_neighbors(label_mask, 2)
+
+# find red cells
+# contrast in channel 1 seems to work pretty well. Should be greater than 0.05
+macrophage_propertyname = 'CONTRAST_CH1'
+limit = 0.05
+macrophages = find_cells_greater_than_prop(tmxml, macrophage_propertyname, limit)
+
+# find green cells
+# this one is much trickier due to the bright middle for channel 2...
+# try contrast greater SNR over 0.4
+apoptosis_propertyname = 'SNR_CH2'
+limit = 0.4
+apoptotic_cells = find_cells_greater_than_prop(tmxml, apoptosis_propertyname, limit)
+
 
 print(f"the tracknames:{tmxml.tracknames}")
 print(" ")
@@ -102,14 +127,14 @@ plt.legend()
 
 
 
-fig, axs = plt.subplots(len(frames),1)
-fig.set_size_inches(5,15)
-for i in range(len(frames)):
-    axs[i].plot(frames[i], intensities[i], label='Cell ' + str(tracks[i]['cell']) + ' ; Child of '+str(tracks[i]['parent']))
-    axs[i].set_xlabel('frame')
-    axs[i].set_ylabel(propertyname)
-    axs[i].legend()
-    # axs[i].set_title(trackname)
+# fig, axs = plt.subplots(len(frames),1)
+# fig.set_size_inches(5,15)
+# for i in range(len(frames)):
+#     axs[i].plot(frames[i], intensities[i], label='Cell ' + str(tracks[i]['cell']) + ' ; Child of '+str(tracks[i]['parent']))
+#     axs[i].set_xlabel('frame')
+#     axs[i].set_ylabel(propertyname)
+#     axs[i].legend()
+#     # axs[i].set_title(trackname)
 
 
 
