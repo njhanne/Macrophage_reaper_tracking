@@ -55,11 +55,11 @@ def get_all_tracks(tmxml, id_range=[], duplicate_split=False, break_split=False)
   all_tracks = defaultdict(list)
   if len(id_range) != 0:
     for i in id_range:
-      all_tracks[i].append(tmxml.analysetrackid(i, duplicate_split, break_split))
-      all_tracks[i].append()
+      all_tracks[i].extend(tmxml.analysetrackid(i, duplicate_split, break_split))
+      # all_tracks[i].append()
   else:
     for i in range(len(tmxml.tracknames)):
-      all_tracks[i].append(tmxml.analysetrackid(i, duplicate_split, break_split))
+      all_tracks[i].extend(tmxml.analysetrackid(i, duplicate_split, break_split))
   return all_tracks
 
 # image_path = filedialog.askopenfilename(title='Select directory of your images to be segmented')
@@ -83,16 +83,18 @@ trackid_range = []
 all_tracks = get_all_tracks(tmxml, trackid_range, duplicate_split=False, break_split=True)
 
 propertyname = 'MEAN_INTENSITY_CH1'
+# property_LUT =
+# frames_LUT =
+#
+# intensities = []
+# frames = []
+# for tracks in all_tracks:
+#   intensities.append(tmxml.getproperty(tracks['spotids'], propertyname))
+#   # frames[tracks] = [tmxml.getproperty(track['spotids'], 'FRAME') for track in all_tracks[tracks]]
 
-intensities = []
-frames = []
-for tracks in all_tracks:
-  intensities[tracks] = [tmxml.getproperty(track['spotids'], propertyname) for track in all_tracks[tracks]]
-  frames[tracks] = [tmxml.getproperty(track['spotids'], 'FRAME') for track in all_tracks[tracks]]
-
-for track in range(len(all_tracks)):
-  for i in range(len(frames[track])):
-    plt.plot(frames[track][i], intensities[track][i]) #, label='Cell ' + str(tracks[i]['cell']) + ' ; Child of '+str(tracks[i]['parent']))
+for track in all_tracks:
+  for sub_track in all_tracks[track]:
+    plt.plot(tmxml.getproperty(sub_track['spotids'], 'FRAME'), tmxml.getproperty(sub_track['spotids'], propertyname)) #, label='Cell ' + str(tracks[i]['cell']) + ' ; Child of '+str(tracks[i]['parent']))
 plt.xlabel('frame')
 plt.ylabel(propertyname)
 plt.legend()
