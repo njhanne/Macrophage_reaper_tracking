@@ -8,26 +8,11 @@ from tkinter import filedialog
 import re
 from pathlib import Path
 
-def find_all_filepaths(directory, extension, file_string=''):
-  # this iterates through the directory and subdirectories and gets all the filepaths that end in your extension
-  # '.extension' is how they should be passed
-  # https://stackoverflow.com/a/59803793
-  subfolders, filepaths = [], []
+import sys
 
-  for f in directory.glob('*'):
-    if f.is_dir():
-      subfolders.append(f)
-    if f.is_file():
-      if f.suffix in extension:
-        if re.search(file_string, f.stem):
-          filepaths.append(f)
+from DirFileHelpers.find_all_files import find_all_filepaths
 
-  for dir in list(subfolders):
-    sf, f = find_all_filepaths(dir, extension, file_string)
-    subfolders.extend(sf)
-    filepaths.extend(f)
-  return subfolders, filepaths
-
+sys.path.append("./DirFileHelpers")
 
 ### MAIN ###
 # First ask for image directory then iteratively find all the images
