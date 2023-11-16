@@ -1,4 +1,4 @@
-import os
+from pathlib import Path
 import re
 
 def find_all_filepaths(directory, extension, file_string=''):
@@ -7,13 +7,14 @@ def find_all_filepaths(directory, extension, file_string=''):
   # https://stackoverflow.com/a/59803793
   subfolders, filepaths = [], []
 
-  for f in os.scandir(directory):
+  # for f in os.scandir(directory):
+  for f in directory.glob('*'):
     if f.is_dir():
-      subfolders.append(f.path)
+      subfolders.append(f)
     if f.is_file():
-      if os.path.splitext(f.name)[1].lower() in extension:
-        if re.search(file_string, os.path.splitext(f.name)[0]):
-          filepaths.append(f.path)
+      if f.suffix in extension:
+        if re.search(file_string, f.stem):
+          filepaths.append(f)
 
   for dir in list(subfolders):
     sf, f = find_all_filepaths(dir, extension, file_string)
