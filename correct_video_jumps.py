@@ -1,5 +1,5 @@
 # image stuff
-import cv2
+# import cv2
 from tifffile import imwrite, imread
 
 # array / dataframe stuff
@@ -17,17 +17,17 @@ from DirFileHelpers.find_all_files import find_all_filepaths
 
 
 def jump_distance_calculations(jump_info):
-  jump_info['delta_x'] = jump_info['x1'] - jump_info['x0']
-  jump_info['delta_y'] = jump_info['y1'] - jump_info['y0']
+  jump_info['delta_x'] = jump_info['x0'] - jump_info['x1']
+  jump_info['delta_y'] = jump_info['y0'] - jump_info['y1']
   return jump_info
 
 
-def initialize_image(x_size, y_size, t_size, jump_info):
+def initialize_image(x_size, y_size, t_size, c_size, jump_info):
   # need to include 0 into the cumsum (lol) or it won't calculate correctly
   y_range = max(np.append(jump_info['cumulative_y'].values, 0)) - min(np.append(jump_info['cumulative_y'].values, 0))
   x_range = max(np.append(jump_info['cumulative_x'].values, 0)) - min(np.append(jump_info['cumulative_x'].values, 0))
   # later, instead of zeros, I think it may make more sense to have it be 'average' pixel intensity background
-  return np.zeros((t_size, y_size+y_range, x_size+x_range))
+  return np.zeros((t_size, c_size, y_size+y_range, x_size+x_range))
 
 
 def jump_image(og_img, new_image, jump_info, x_size, y_size, t_size):
@@ -38,17 +38,18 @@ def jump_image(og_img, new_image, jump_info, x_size, y_size, t_size):
     if not match_t_row.empty:
       x0 = x0 + match_t_row['delta_x'].values[0]
       y0 = y0 + match_t_row['delta_y'].values[0]
-    new_image[t, y0:y0+y_size, x0:x0+x_size] = og_img[t,:,:]
+    new_image[t, :, y0:y0+y_size, x0:x0+x_size] = og_img[t,:,:,:]
   return new_image
 
 
 def bound_new_image(jump_info, og_img):
-  x_size = og_img.shape[2]
-  y_size = og_img.shape[1]
   t_size = og_img.shape[0]
+  c_size = og_img.shape[1]
+  y_size = og_img.shape[2]
+  x_size = og_img.shape[3]
   jump_info['cumulative_x'] = jump_info['delta_x'].cumsum()
   jump_info['cumulative_y'] = jump_info['delta_y'].cumsum()
-  new_image = initialize_image(x_size, y_size, t_size, jump_info)
+  new_image = initialize_image(x_size, y_size, t_size, c_size, jump_info)
   new_image = jump_image(og_img, new_image, jump_info, x_size, y_size, t_size)
   return new_image
 
@@ -63,6 +64,7 @@ def bound_new_image(jump_info, og_img):
 
 data_dir = (Path.cwd() / 'data').resolve()
 process_dir = (data_dir / '8bit-tiffs' / 'test').resolve()
+output_dir = (data_dir / '8bit-tiffs' / 'corrected').resolve()
 image_dirs, image_paths = find_all_filepaths(Path(process_dir), '.tif')
 
 image_jump_info_csv = Path(data_dir / 'image_jump.csv')
@@ -80,8 +82,10 @@ for image_path in image_paths:
   img_jump_info = jump_info.loc[jump_info['file name'].str.startswith(re.search('(.*?)_crop', image_path.stem).group(1))]
   new_img = bound_new_image(img_jump_info, original_image)
 
-  plt.imshow(new_img[50,:,:])
-  plt.show()
+  # plt.imshow(new_img[50,:,:])
+  # plt.show()
+  savename = (Path(output_dir) / (image_path.stem + '_corrected.tif')).resolve()
+  imwrite(savename, new_img.astype('uint8'), imagej=True, metadata={'axes': 'TCYX'},)
 
 
   # # create the stack
