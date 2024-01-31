@@ -9,10 +9,10 @@ import re
 from pathlib import Path
 
 import sys
-
+sys.path.append("./DirFileHelpers")
 from DirFileHelpers.find_all_files import find_all_filepaths
 
-sys.path.append("./DirFileHelpers")
+
 
 ### MAIN ###
 # First ask for image directory then iteratively find all the images

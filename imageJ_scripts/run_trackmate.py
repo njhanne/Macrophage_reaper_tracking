@@ -3,6 +3,9 @@
 
 import sys
 from datetime import datetime as dt
+import re
+import os
+
 
 from ij import IJ
 from ij import WindowManager
@@ -36,6 +39,19 @@ sys.setdefaultencoding('utf-8')
 # 	EDIT FILE PATHS BELOW.
 # ------------------------------------------------------
 
+def find_all_filepaths(directory, extension):
+  filepaths = []
+
+  for subdir, dirs, files in os.walk(directory):
+    for file in files:
+      # print os.path.join(subdir, file)
+      filepath = os.path.normpath(subdir + os.sep + file)
+
+      if filepath.endswith(extension):
+        filepaths.append(filepath)
+        print(filepath)
+  return(filepaths)
+
 # Shall we display the results each time?
 show_output = False
 
@@ -43,8 +59,8 @@ show_output = False
 channel_to_process = 3
 
 # Image files to analyse.
-file_paths = []
-file_paths.append( "C:/Users/njhan/Box/Collaboration/macrophage_video/test.tif" )
+directory_to_process = os.path.normpath("C:/Users/njhan/Box/Collaboration/macrophage_video")
+file_paths = find_all_filepaths(directory_to_process, '.tif')
 
 
 # ------------------------------------------------------
@@ -181,7 +197,7 @@ def run(image_file):
 
 for file_path in file_paths:
   dt_string = dt.now().strftime("%d/%m/%Y %H:%M:%S")
-  print('\nRunning analysis on %s - %s' % (file_path, dt_string))
+  print('\nRunning analysis on %s - %s' % (str(file_path), dt_string))
 
   run(file_path)
 

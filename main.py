@@ -8,6 +8,7 @@ from tifffile import imread
 # from pytrackmate import trackmate_peak_import # if this isn't working check the version vs github version...
 import sys
 sys.path.append("./DirFileHelpers")
+from find_all_files import find_all_filepaths
 from trackmatexml import TrackmateXML # I didn't make this!
 # https://github.com/rharkes/pyTrackMateXML
 # requires lxml and (from pip) version-parser
@@ -55,12 +56,16 @@ def find_touching_cells(mask, connectivity = 2):
 
 
 def find_distant_neighbors(label_mask, target_cells, distance):
-  # TODO figure out pixel to micron ratio in images and code that in
-  # expansion_structure = morphology.disk(distance)
   # may need a + or - here as the labelimage and xml are 1 off
-  original_mask = np.isin(label_mask, target_cells)
-  # this 'works' in 3D but I don't think we want it to, should loop over each t slice
-  expanded_mask = segmentation.expand_labels(original_mask, distance)
+  original_target_mask = np.isin(label_mask, target_cells) * label_mask
+  # 0.65 um xy pixel
+  distance_pixel = distance / 0.65
+
+  # this works in 3D but I don't think we want it to since it is time not z, should loop over each t slice
+  expanded_mask = np.zeros_like(original_target_mask)
+  for frame in range(label_mask.shape[0]):
+    expanded_mask[frame,:,:] = segmentation.expand_labels(original_target_mask[frame,:,:], distance_pixel)
+
   overlapping_stain = np.logical_and(label_mask, expanded_mask)
   overlap_cells = np.unique(label_mask[overlapping_stain])
   matches = []
@@ -121,13 +126,22 @@ def get_frame_stats(tmxml, macrophages, apoptotic_cells, touching_cells, n_frame
   afs = defaultdict(dict)
   frame_c = tmxml.spotheader.index('FRAME')
   for frame in range(n_frames):
+    # get the index of all cells in this frame
     frame_cells_i = np.where(tmxml.spots[:,frame_c] == frame)[0]
+    #  get the label of all cells in the frame
     afs[frame]['cells_label'] = tmxml.spots[frame_cells_i,0]
+    # which of these are also known macrophages
     afs[frame]['macrophages'] = set(afs[frame]['cells_label']) & set(macrophages) # finds matches
+    # which of these are known apoptotic
     afs[frame]['apoptotic'] = set(afs[frame]['cells_label']) & set(apoptotic_cells) # finds matches
-    afs[frame]['mac_touch'] = set(touching_cells[frame]) & set(afs[frame]['macrophages'] )
+    # from the list of cells that are touching, which are macrophages, i.e. which macrophages are touching cells
+    afs[frame]['mac_touch'] = set(touching_cells[frame]) & set(afs[frame]['macrophages'])
+    # from the touching list, which are dying
     afs[frame]['dead_touch'] = set(touching_cells[frame]) & set(afs[frame]['apoptotic'])
-    afs[frame]['mac_dead_touch'] = set(afs[frame]['mac_touch']) & set(afs[frame]['apoptotic'])
+    # of the macrophages touching cells, which are touching apoptic cells?
+    cells_macrophages_touch = [touching_cells[frame][x] for x in afs[frame]['mac_touch']]
+    cells_macrophages_touch = [cell for cells in cells_macrophages_touch for cell in cells] #flatten list
+    afs[frame]['mac_dead_touch'] = set(cells_macrophages_touch) & set(afs[frame]['apoptotic'])
   return(afs)
 
 
@@ -180,7 +194,10 @@ for frame in range(len(all_frame_stats)):
   print('\n frame ', frame)
   print('chondro death touch: ', chondro_reaper_rate * 100)
   print('macro death touch: ', macro_reaper_rate * 100)
-  print('macro effectiveness: ', macro_reaper_rate / chondro_reaper_rate)
+  if chondro_reaper_rate == 0:
+    print('macro effectiveness: inf')
+  else:
+    print('macro effectiveness: ', macro_reaper_rate / chondro_reaper_rate)
 
 
 for track in all_tracks:
