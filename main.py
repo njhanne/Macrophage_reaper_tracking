@@ -62,15 +62,19 @@ def find_distant_neighbors(label_mask, target_cells, distance):
   distance_pixel = distance / 0.65
 
   # this works in 3D but I don't think we want it to since it is time not z, should loop over each t slice
-  expanded_mask = np.zeros_like(original_target_mask)
+  matches = defaultdict(dict)
   for frame in range(label_mask.shape[0]):
-    expanded_mask[frame,:,:] = segmentation.expand_labels(original_target_mask[frame,:,:], distance_pixel)
-
-  overlapping_stain = np.logical_and(label_mask, expanded_mask)
-  overlap_cells = np.unique(label_mask[overlapping_stain])
-  matches = []
-  for cell in overlap_cells:
-    matched_cell = np.unique(expanded_mask[np.where(label_mask == cell)])
+    frame_macs = np.unique(original_target_mask[frame,:,:])
+    expanded_mask = segmentation.expand_labels(original_target_mask[frame,:,:], distance_pixel)
+    # overlapping_stain = np.logical_and(label_mask[frame,:,:], expanded_mask)
+    # overlap_cells = np.unique(label_mask[frame,:,:][overlapping_stain])
+    for mac in frame_macs:
+      if mac != 0:
+        matched_cells = np.unique(label_mask[frame,:,:][np.where(expanded_mask == mac)])
+        matched_cells = matched_cells[(matched_cells != 0) & (matched_cells != mac)]
+        if matched_cells.size != 0:
+          matches[frame][mac] = matched_cells
+  return matches
 # #   if len(matched_stain) > 1: # this prevents an error  where the entire stain overlaps with nuclei
 # #     matched_stain = matched_stain[1:]
 # #   if len(matched_stain) > 1: # this chooses the better match
@@ -122,7 +126,7 @@ def find_cells_greater_than_prop(tmxml, cell_propertyname, limit):
 # End xml helpers
 
 # Analysis Helpers
-def get_frame_stats(tmxml, macrophages, apoptotic_cells, touching_cells, n_frames):
+def get_frame_stats(tmxml, macrophages, apoptotic_cells, touching_cells, neighbors, n_frames):
   afs = defaultdict(dict)
   frame_c = tmxml.spotheader.index('FRAME')
   for frame in range(n_frames):
@@ -136,8 +140,12 @@ def get_frame_stats(tmxml, macrophages, apoptotic_cells, touching_cells, n_frame
     afs[frame]['apoptotic'] = set(afs[frame]['cells_label']) & set(apoptotic_cells) # finds matches
     # from the list of cells that are touching, which are macrophages, i.e. which macrophages are touching cells
     afs[frame]['mac_touch'] = set(touching_cells[frame]) & set(afs[frame]['macrophages'])
+    # from the list of cells that are neighbors, which are macrophages, i.e. which macrophages are near cells
+    afs[frame]['mac_neighbor'] = list(neighbors[frame].keys())
     # from the touching list, which are dying
     afs[frame]['dead_touch'] = set(touching_cells[frame]) & set(afs[frame]['apoptotic'])
+    # from the neighbor list, which are dying
+    afs[frame]['mac_dead_neighbor'] = set(touching_cells[frame]) & set(afs[frame]['apoptotic'])
     # of the macrophages touching cells, which are touching apoptic cells?
     cells_macrophages_touch = [touching_cells[frame][x] for x in afs[frame]['mac_touch']]
     cells_macrophages_touch = [cell for cells in cells_macrophages_touch for cell in cells] #flatten list
@@ -184,20 +192,23 @@ propertyname = 'MEAN_INTENSITY_CH1'
 #   intensities.append(tmxml.getproperty(tracks['spotids'], propertyname))
   # frames[tracks] = [tmxml.getproperty(track['spotids'], 'FRAME') for track in all_tracks[tracks]]
 
-
-all_frame_stats = get_frame_stats(tmxml, macrophages, apoptotic_cells, touching_cells, len(label_mask))
+distant_neighbors = find_distant_neighbors(label_mask, macrophages, 20)
+all_frame_stats = get_frame_stats(tmxml, macrophages, apoptotic_cells, touching_cells, distant_neighbors, len(label_mask))
 print('test')
 for frame in range(len(all_frame_stats)):
   chondro_reaper_rate = (len(all_frame_stats[frame]['dead_touch']) - len(all_frame_stats[frame]['mac_dead_touch'])) / \
                             (len(all_frame_stats[frame]['cells_label']) - len(all_frame_stats[frame]['apoptotic']) - len(all_frame_stats[frame]['macrophages']))
   macro_reaper_rate = (len(all_frame_stats[frame]['mac_dead_touch'])) / (len(all_frame_stats[frame]['macrophages']))
+  macro_reaper_rate2 = (len(all_frame_stats[frame]['mac_dead_neighbor'])) / (len(all_frame_stats[frame]['macrophages']))
   print('\n frame ', frame)
   print('chondro death touch: ', chondro_reaper_rate * 100)
   print('macro death touch: ', macro_reaper_rate * 100)
+  print('macro death neighbor: ', macro_reaper_rate2 * 100)
   if chondro_reaper_rate == 0:
     print('macro effectiveness: inf')
   else:
     print('macro effectiveness: ', macro_reaper_rate / chondro_reaper_rate)
+    print('macro reach eff: ', macro_reaper_rate2 / chondro_reaper_rate)
 
 
 for track in all_tracks:
