@@ -194,21 +194,30 @@ propertyname = 'MEAN_INTENSITY_CH1'
 
 distant_neighbors = find_distant_neighbors(label_mask, macrophages, 20)
 all_frame_stats = get_frame_stats(tmxml, macrophages, apoptotic_cells, touching_cells, distant_neighbors, len(label_mask))
+
+with open('test.pickle', 'wb') as handle:
+  pickle.dump(all_frame_stats, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+with open('test.pickle', 'rb') as handle:
+  y = pickle.load(handle)
+
 print('test')
-for frame in range(len(all_frame_stats)):
-  chondro_reaper_rate = (len(all_frame_stats[frame]['dead_touch']) - len(all_frame_stats[frame]['mac_dead_touch'])) / \
-                            (len(all_frame_stats[frame]['cells_label']) - len(all_frame_stats[frame]['apoptotic']) - len(all_frame_stats[frame]['macrophages']))
-  macro_reaper_rate = (len(all_frame_stats[frame]['mac_dead_touch'])) / (len(all_frame_stats[frame]['macrophages']))
-  macro_reaper_rate2 = (len(all_frame_stats[frame]['mac_dead_neighbor'])) / (len(all_frame_stats[frame]['macrophages']))
-  print('\n frame ', frame)
-  print('chondro death touch: ', chondro_reaper_rate * 100)
-  print('macro death touch: ', macro_reaper_rate * 100)
-  print('macro death neighbor: ', macro_reaper_rate2 * 100)
-  if chondro_reaper_rate == 0:
-    print('macro effectiveness: inf')
-  else:
-    print('macro effectiveness: ', macro_reaper_rate / chondro_reaper_rate)
-    print('macro reach eff: ', macro_reaper_rate2 / chondro_reaper_rate)
+# for frame in range(len(all_frame_stats)):
+#   chondro_reaper_rate = (len(all_frame_stats[frame]['dead_touch']) - len(all_frame_stats[frame]['mac_dead_touch'])) / \
+#                             (len(all_frame_stats[frame]['cells_label']) - len(all_frame_stats[frame]['apoptotic']) - len(all_frame_stats[frame]['macrophages']))
+#   macro_reaper_rate = (len(all_frame_stats[frame]['mac_dead_touch'])) / (len(all_frame_stats[frame]['macrophages']))
+#   macro_reaper_rate2 = (len(all_frame_stats[frame]['mac_dead_neighbor'])) / (len(all_frame_stats[frame]['macrophages']))
+#   print('\n frame ', frame)
+#   print('chondro death touch: ', chondro_reaper_rate * 100)
+#   print('macro death touch: ', macro_reaper_rate * 100)
+#   print('macro death neighbor: ', macro_reaper_rate2 * 100)
+#   if chondro_reaper_rate == 0:
+#     print('macro effectiveness: inf')
+#   else:
+#     print('macro effectiveness: ', macro_reaper_rate / chondro_reaper_rate)
+#     print('macro reach eff: ', macro_reaper_rate2 / chondro_reaper_rate)
+
+
 
 
 for track in all_tracks:
