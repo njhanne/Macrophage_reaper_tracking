@@ -3,6 +3,7 @@ from skimage.graph import pixel_graph
 from skimage import segmentation
 import pandas as pd
 import matplotlib.pyplot as plt
+import pickle
 
 from tifffile import imread
 # from pytrackmate import trackmate_peak_import # if this isn't working check the version vs github version...
@@ -18,7 +19,7 @@ from tkinter import filedialog
 from collections import defaultdict
 
 ### Neighbor Finding Helpers
-def find_neighbors(label_mask, connectivity = 2):
+def find_neighbors(label_mask, corrections, connectivity = 2):
   # https://stackoverflow.com/questions/72452267/finding-identity-of-touching-labels-objects-masks-in-images-using-python
   all_pairs = defaultdict(dict)
   if len(label_mask.shape) == 2:
@@ -26,14 +27,14 @@ def find_neighbors(label_mask, connectivity = 2):
     # for connectivity. i.e. skimage.morphology.disk(4) would be a disk of radius 4
     # no, this is not how this function works or what it does. It only finds edges that touch, not overlap
     # I should use the overlapping code from the GM130 work.
-    all_pairs[0] = find_touching_cells(label_mask, connectivity = 2)
+    all_pairs[0] = find_touching_cells(label_mask, corrections[0], connectivity = 2)
   else:
     for slice in range(len(label_mask)):
-      all_pairs[slice] = find_touching_cells(label_mask[slice, :, :], connectivity = 2)
+      all_pairs[slice] = find_touching_cells(label_mask[slice, :, :], corrections[slice], connectivity = 2)
   return all_pairs
 
 
-def find_touching_cells(mask, connectivity = 2):
+def find_touching_cells(mask, corrections, connectivity = 2):
   # connectivity count diagonals in 2D
   g, nodes = pixel_graph(mask, mask=mask.astype(bool), connectivity=connectivity)
 
@@ -51,13 +52,16 @@ def find_touching_cells(mask, connectivity = 2):
   pairs = defaultdict(list)
   for pair in touching_masks:
     if pair[0] != pair[1]:
-      pairs[pair[0]-1].append(pair[1]-1)
+     pairs[corrections[pair[0]]].append(corrections[pair[1]])
   return pairs
 
 
-def find_distant_neighbors(label_mask, target_cells, distance):
+def find_distant_neighbors(label_mask, target_cells, distance, corrections):
   # may need a + or - here as the labelimage and xml are 1 off
-  original_target_mask = np.isin(label_mask, target_cells) * label_mask
+  original_target_mask = np.zeros_like(label_mask)
+  for frame in range(label_mask.shape[0]):
+    original_target_mask[frame,:,:] = np.isin(label_mask[frame,:,:],  [corrections[frame][x] for x in target_cells[frame]]) * label_mask[frame,:,:]
+  # original_target_mask = np.isin(label_mask, target_cells) * label_mask
   # 0.65 um xy pixel
   distance_pixel = distance / 0.65
 
@@ -75,26 +79,6 @@ def find_distant_neighbors(label_mask, target_cells, distance):
         if matched_cells.size != 0:
           matches[frame][mac] = matched_cells
   return matches
-# #   if len(matched_stain) > 1: # this prevents an error  where the entire stain overlaps with nuclei
-# #     matched_stain = matched_stain[1:]
-# #   if len(matched_stain) > 1: # this chooses the better match
-# #     dist = distance.cdist([nuc_centroids[nuc-1]]*scaling, stain_centroids[matched_stain - 1]*scaling) # calculate distances
-# #     matched_stain = matched_stain[dist.argsort()][0] # pick the match with the shortest distance
-#   matched_stain = matched_stain[0] # its a list of lists, get rid of the layering
-#
-#   # nuc_mask = np.where(nuc_img[int(nuc_centroids[nuc][2]), :, :] == (nuc), 1, 0)
-#   # stain_mask = np.where(stain_img[int(stain_centroids[matched_stain][2]), :, :] == (matched_stain), 1, 0)
-#   # test_helper(nuc_mask, stain_mask, nuc_centroids, stain_centroids, [nuc, matched_stain])
-#
-#   matches.append([nuc, matched_stain])
-# matches = np.array(matches) # matches are in image index, not centroid index
-# # Find all the duplicates and delete them
-# dups, dup_id, dup_count = np.unique(matches[:,1], return_inverse=True, return_counts=True)
-# count_mask = dup_count > 1
-# duplicates = dups[count_mask]
-# to_del = np.argwhere(np.isin(matches[:,1], duplicates))
-# first_matches = np.delete(matches, to_del, axis=0)
-
 
 
 # End neighbor helpers
@@ -113,20 +97,47 @@ def get_all_tracks(tmxml, id_range=[], duplicate_split=False, break_split=False)
 
 
 def find_cells_greater_than_prop(tmxml, cell_propertyname, limit):
-  cells  = []
-  property_col_i = tmxml.spotheader.index(cell_propertyname)
-  cell_property = tmxml.spots[:,property_col_i]
+  cells  = defaultdict(list)
+  property_col = tmxml.spotheader.index(cell_propertyname)
+  frame_c = tmxml.spotheader.index('FRAME')
+  cell_property = tmxml.spots[:,property_col]
   cell_list = (i for i, x in enumerate(cell_property) if x >= limit)
   for i in cell_list:
     # gets the label id instead of the row number (i)
-    cells.append(tmxml.spots[i,0])
+    cells[tmxml.spots[i,frame_c]].append(tmxml.spots[i,0])
   return cells
+
+
+def get_label_correction(label_mask, tmxml):
+  corrections = defaultdict(dict)
+  rev_corrections = defaultdict(dict)
+
+  cell_id_c = tmxml.spotheader.index('ID')
+  positionx_c = tmxml.spotheader.index('POSITION_X')
+  positiony_c = tmxml.spotheader.index('POSITION_Y')
+  frame_c = tmxml.spotheader.index('FRAME')
+
+  first_cell_id = min(tmxml.spots[:,cell_id_c])
+  first_cell_i = np.where(tmxml.spots[:,cell_id_c] == first_cell_id)[0][0]
+
+  label_start = label_mask[int(tmxml.spots[first_cell_i,frame_c]), int(tmxml.spots[first_cell_i,positiony_c]), int(tmxml.spots[first_cell_i,positionx_c])]
+  label_delta = label_start - first_cell_id #is it always 16bit? probably how it's coded in trackmate...
+  turnover_id = 65536 - label_start + first_cell_id # when it turns over we will lose a cell because it's mask is saved as 0, which is background
+
+  for frame in range(label_mask.shape[0]):
+    for cell_i in np.where(tmxml.spots[:,frame_c] == frame)[0]:
+      corresponding_label = (tmxml.spots[cell_i,cell_id_c] + label_delta) % 65536
+      if corresponding_label == 0:
+        corresponding_label = 65537
+      corrections[frame][tmxml.spots[cell_i,cell_id_c]] = corresponding_label
+    rev_corrections[frame] = {v: k for k, v in corrections[frame].items()}
+  return corrections, rev_corrections
 
 
 # End xml helpers
 
 # Analysis Helpers
-def get_frame_stats(tmxml, macrophages, apoptotic_cells, touching_cells, neighbors, n_frames):
+def get_frame_stats(tmxml, macrophages, apoptotic_cells, touching_cells, neighbors, n_frames, corrections):
   afs = defaultdict(dict)
   frame_c = tmxml.spotheader.index('FRAME')
   for frame in range(n_frames):
@@ -135,9 +146,9 @@ def get_frame_stats(tmxml, macrophages, apoptotic_cells, touching_cells, neighbo
     #  get the label of all cells in the frame
     afs[frame]['cells_label'] = tmxml.spots[frame_cells_i,0]
     # which of these are also known macrophages
-    afs[frame]['macrophages'] = set(afs[frame]['cells_label']) & set(macrophages) # finds matches
+    afs[frame]['macrophages'] = set(afs[frame]['cells_label']) & set(macrophages[frame]) # finds matches
     # which of these are known apoptotic
-    afs[frame]['apoptotic'] = set(afs[frame]['cells_label']) & set(apoptotic_cells) # finds matches
+    afs[frame]['apoptotic'] = set(afs[frame]['cells_label']) & set(apoptotic_cells[frame]) # finds matches
     # from the list of cells that are touching, which are macrophages, i.e. which macrophages are touching cells
     afs[frame]['mac_touch'] = set(touching_cells[frame]) & set(afs[frame]['macrophages'])
     # from the list of cells that are neighbors, which are macrophages, i.e. which macrophages are near cells
@@ -165,34 +176,22 @@ xml_track_path = filedialog.askopenfilename(title='Select trackmate xml')
 tmxml = TrackmateXML()
 tmxml.loadfile(xml_track_path)
 
+# fix the label image (hopefully this gets fixed soon!)
+correction_dictionary, rev_corrections = get_label_correction(label_mask, tmxml)
+
 # find touching cells
-touching_cells = find_neighbors(label_mask, 2)
+touching_cells = find_neighbors(label_mask, rev_corrections, 2)
 
 # find red cells
 # contrast in channel 1 seems to work pretty well. Should be greater than 0.05
-macrophages = find_cells_greater_than_prop(tmxml, 'MEAN_INTENSITY_CH1', 50)
+macrophages = find_cells_greater_than_prop(tmxml, 'MEAN_INTENSITY_CH1', 55)
 #
 # # find green cells
 # # this one is much trickier due to the bright middle for channel 2...
 # # try contrast greater SNR over 0.4
-apoptotic_cells = find_cells_greater_than_prop(tmxml, 'MAX_INTENSITY_CH2', 255)
+apoptotic_cells = find_cells_greater_than_prop(tmxml, 'SNR_CH2', .3)
 
-
-trackid_range = []
-# tracks = tmxml.analysetrackid(trackid, duplicate_split=False, break_split=True)
-all_tracks = get_all_tracks(tmxml, trackid_range, duplicate_split=False, break_split=True)
-
-propertyname = 'MEAN_INTENSITY_CH1'
-# property_LUT =
-# frames_LUT =
-
-# intensities = []
-# frames = []
-# for tracks in all_tracks:
-#   intensities.append(tmxml.getproperty(tracks['spotids'], propertyname))
-  # frames[tracks] = [tmxml.getproperty(track['spotids'], 'FRAME') for track in all_tracks[tracks]]
-
-distant_neighbors = find_distant_neighbors(label_mask, macrophages, 20)
+distant_neighbors = find_distant_neighbors(label_mask, macrophages, 20, correction_dictionary)
 all_frame_stats = get_frame_stats(tmxml, macrophages, apoptotic_cells, touching_cells, distant_neighbors, len(label_mask))
 
 with open('test.pickle', 'wb') as handle:
@@ -216,22 +215,5 @@ print('test')
 #   else:
 #     print('macro effectiveness: ', macro_reaper_rate / chondro_reaper_rate)
 #     print('macro reach eff: ', macro_reaper_rate2 / chondro_reaper_rate)
-
-
-
-
-for track in all_tracks:
-  for sub_track in all_tracks[track]:
-    plt.plot(tmxml.getproperty(sub_track.spotids, 'FRAME'), tmxml.getproperty(sub_track.spotids, propertyname)) #, label='Cell ' + str(tracks[i]['cell']) + ' ; Child of '+str(tracks[i]['parent']))
-plt.xlabel('frame')
-plt.ylabel(propertyname)
-plt.legend()
-# plt.title(trackid)
-
-
-
-
-
-
 
 print('hello')
