@@ -36,8 +36,8 @@ def jump_image(og_img, new_image, jump_info, x_size, y_size, t_size):
   for t in range(t_size):
     match_t_row = jump_info.loc[jump_info['t'] == t+1]
     if not match_t_row.empty:
-      x0 = x0 + match_t_row['delta_x'].values[0]
-      y0 = y0 + match_t_row['delta_y'].values[0]
+      x0 = x0 + match_t_row['dx'].values[0]
+      y0 = y0 + match_t_row['dy'].values[0]
     new_image[t, :, y0:y0+y_size, x0:x0+x_size] = og_img[t,:,:,:]
   return new_image
 
@@ -47,8 +47,8 @@ def bound_new_image(jump_info, og_img):
   c_size = og_img.shape[1]
   y_size = og_img.shape[2]
   x_size = og_img.shape[3]
-  jump_info['cumulative_x'] = jump_info['delta_x'].cumsum()
-  jump_info['cumulative_y'] = jump_info['delta_y'].cumsum()
+  jump_info['cumulative_x'] = jump_info['dx'].cumsum()
+  jump_info['cumulative_y'] = jump_info['dy'].cumsum()
   new_image = initialize_image(x_size, y_size, t_size, c_size, jump_info)
   new_image = jump_image(og_img, new_image, jump_info, x_size, y_size, t_size)
   return new_image
@@ -56,35 +56,44 @@ def bound_new_image(jump_info, og_img):
 
 ### Main ###
 # We have time-series fluorescent stacks taken of in vitro culture of MSC and macrophages
-# I think sometimes someone comes in and switches media on the cells which makes the video jump
+# I think the camera moves to other wells or something which makes the video jump
 # These jumps prevent celltracker from keeping track of cell movement as they move too far for it to register
 # This code should create a larger image that moves the image to prevent jumps
 # Unfortunately this requires a human to manually note when the jump occurs and how far they move
 # We will read in a csv of the jump info and use it to create a new image stack
 
+# so far it looks like nearly all the jumps happen on the same timepoint and similar distances
+# I may just use the same jump info for all vids
+
 data_dir = (Path.cwd() / 'data').resolve()
-process_dir = (data_dir / '8bit-tiffs' / 'test').resolve()
-output_dir = (data_dir / '8bit-tiffs' / 'corrected').resolve()
-image_dirs, image_paths = find_all_filepaths(Path(process_dir), '.tif')
+process_dir = (data_dir / 'processed' / '8bit-tiffs').resolve()
+output_dir = (data_dir / 'processed' / 'stabilized_tiffs').resolve()
+image_dirs, image_paths = find_all_filepaths(Path(process_dir), '.tiff')
+
+image_info_csv = Path(data_dir / 'image_log.csv')
+image_info = pd.read_csv(image_info_csv)
 
 image_jump_info_csv = Path(data_dir / 'image_jump.csv')
 jump_info = pd.read_csv(image_jump_info_csv)
-jump_info = jump_distance_calculations(jump_info)
-print('hey')
+
+# jump_info = jump_distance_calculations(jump_info) this is old way, new way may not need this anymore
+# print('hey')
 
 
 # loop through images
 for image_path in image_paths:
-  original_image = imread(str(image_path))
+  original_image = imread(str(image_path)) #TCYX
 
   # match video to dataframe info
   # finds string match between beginning of string and '_crop'. The group tells it to  only get the first match, not the whole string
-  img_jump_info = jump_info.loc[jump_info['file name'].str.startswith(re.search('(.*?)_crop', image_path.stem).group(1))]
+  # img_jump_info = image_info.loc[image_info['new_filename'].str.startswith(re.search('(.*?)\.ome', image_path.stem).group(1))]
+  img_info = image_info.loc[image_info['new_filename'].str.fullmatch(re.search('(.*?)\.ome', image_path.stem).group(1))]
+  img_jump_info = jump_info.loc[jump_info['file name'] == img_info['jump_correction'].values[0]]
   new_img = bound_new_image(img_jump_info, original_image)
 
   # plt.imshow(new_img[50,:,:])
   # plt.show()
-  savename = (Path(output_dir) / (image_path.stem + '_corrected.tif')).resolve()
+  savename = (Path(output_dir) / (img_info['new_filename'].values[0] + '_corrected.tiff')).resolve()
   imwrite(savename, new_img.astype('uint8'), imagej=True, metadata={'axes': 'TCYX'},)
 
 
