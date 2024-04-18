@@ -100,18 +100,40 @@ def create_cell_tracks(tmxml, all_frame_stats):
   tracks = get_all_tracks(tmxml)
   cell_id = 0
   all_cells = []
-  for track in tracks:
-    for cell in tracks[track]:
+  for track in tracks: # loop through all the tracks
+    for cell in tracks[track]: # each track can have multiple 'splits' which are still called tracks...
       cell_track = {}
-      cell_track['cell_id'] = cell_id + cell.cell
-      cell_track['spot_ids'] = list(cell.spotids)
+      cell_track['original_track_id'] = track # for making LUT later
+      cell_track['cell_id'] = cell_id + cell.cell # make a new unique track/cell id for all the cells in the video
+      cell_track['spot_ids'] = list(cell.spotids) # get all the spots in the track
       if cell.parent != 0:
         cell_track['parent_id'] = cell_id + cell.parent
       else:
         cell_track['parent_id'] = None
       all_cells.append(cell_track)
+      cell_track['frames'] = list(tmxml.getproperty(cell_track['spot_ids'], 'FRAME')) # get the frame # of each spot
+
     cell_id += len(tracks[track])
-  return pd.DataFrame(all_cells)
+  return pd.DataFrame(all_cells) # very convenient we can convert list/dict to dataframe, good for csv export
+
+
+def make_cell_spot_LUT(cell_tracks, tmxml):
+  # create a dictionary of spot-id 'keys' for cell_track id 'values'
+  LUT = defaultdict(dict)
+  # you aren't really supposed to iterate on pandas objects but this is so much easier with the 'list of keys' issue
+  for i, cell in cell_tracks[cell_tracks['parent_id'].isna()].iterrows():
+    tmp_id = cell.cell_id
+    for spot_id in cell.spot_ids:
+      LUT[spot_id] = tmp_id
+  # now for the children ones
+  # setdefault command will only update if the key hasn't been used, which preserves the 'parent' ones instead
+  # combined with the duplicate_split argument for get_all_tracks function this should make it where parent cells are the
+  # 'default' cell and children are only considered when 'independent'. I think this is what we want for now.
+  for i, cell in cell_tracks[cell_tracks['parent_id'].notna()].iterrows():
+    tmp_id = cell.cell_id
+    for spot_id in cell.spot_ids:
+      LUT.setdefault(spot_id,  tmp_id)
+  return LUT
 
 
 
@@ -128,6 +150,7 @@ def find_cells_greater_than_prop(tmxml, cell_propertyname, limit):
 
 
 def get_label_correction(label_mask, tmxml):
+  # probably deprecated now that the labelimages are 32 bit. We'll see!
   corrections = defaultdict(dict)
   rev_corrections = defaultdict(dict)
 
@@ -187,6 +210,31 @@ def get_frame_stats(tmxml, macrophages, apoptotic_cells, touching_cells, neighbo
 
   return(afs)
 
+def get_cell_stats(tmxml, cell_tracks, cell_spot_LUT, macrophages, apoptotic_cells, touching_cells, distant_neighbors, n_frames, all_frame_stats):
+  print('test')
+  # apoptotic spots & frames
+  apoptitic_tall = [(i, k) for i, j in enumerate(apoptotic_cells) for k in j]
+  apoptotic_df = pd.DataFrame(apoptitic_tall)
+  apoptotic_df['cell_id'] = apoptotic_df[1].map(cell_spot_LUT)
+  apoptotic_df['cell_id'] = pd.to_numeric(apoptotic_df['cell_id'], downcast='integer')
+  apoptotic_df = apoptotic_df.groupby('cell_id').agg(lambda x: list(x))
+  apoptotic_df = apoptotic_df.rename_axis("cell_id").reset_index()
+  apoptotic_df.columns = ["cell_id", 'apoptotic_frames', 'apoptotic_spots']
+  temp_cell_tracks = cell_tracks.merge(apoptotic_df, on='cell_id', how='outer')
+
+  macrophages_tall = [(i, k) for i,j in enumerate(list(macrophages.values())) for k in j]
+  macrophage_df = pd.DataFrame(macrophages_tall)
+  macrophage_df['cell_id'] = macrophage_df[1].map(cell_spot_LUT)
+  macrophage_df['cell_id'] = pd.to_numeric(macrophage_df['cell_id'], downcast='integer')
+  macrophage_df = macrophage_df.groupby('cell_id').agg(lambda x: list(x))
+  macrophage_df = macrophage_df.rename_axis("cell_id").reset_index()
+  macrophage_df.columns = ["cell_id", 'macrophage_frames', 'macrophage_spots']
+  temp_cell_tracks = cell_tracks.merge(macrophage_df, on='cell_id', how='outer')
+
+
+
+
+  return temp_cell_tracks
 
 # End analysis helpers
 
@@ -228,6 +276,8 @@ distant_neighbors = find_distant_neighbors(label_mask, macrophages, 20)
 all_frame_stats = get_frame_stats(tmxml, macrophages, apoptotic_cells, touching_cells, distant_neighbors, len(label_mask))
 
 cell_tracks = create_cell_tracks(tmxml, all_frame_stats)
+cell_spot_LUT = make_cell_spot_LUT(cell_tracks, tmxml)
+all_cell_stats = get_cell_stats(tmxml, cell_tracks, cell_spot_LUT, macrophages, apoptotic_cells, touching_cells, distant_neighbors, len(label_mask), all_frame_stats)
 
 with open('test_48_24.pickle', 'wb') as handle:
   pickle.dump(all_frame_stats, handle, protocol=pickle.HIGHEST_PROTOCOL)
