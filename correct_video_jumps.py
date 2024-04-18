@@ -82,19 +82,20 @@ jump_info = pd.read_csv(image_jump_info_csv)
 
 # loop through images
 for image_path in image_paths:
-  original_image = imread(str(image_path)) #TCYX
-
-  # match video to dataframe info
-  # finds string match between beginning of string and '_crop'. The group tells it to  only get the first match, not the whole string
-  # img_jump_info = image_info.loc[image_info['new_filename'].str.startswith(re.search('(.*?)\.ome', image_path.stem).group(1))]
   img_info = image_info.loc[image_info['new_filename'].str.fullmatch(re.search('(.*?)\.ome', image_path.stem).group(1))]
-  img_jump_info = jump_info.loc[jump_info['file name'] == img_info['jump_correction'].values[0]]
-  new_img = bound_new_image(img_jump_info, original_image)
+  if img_info['jump_correction'].values[0] in ('d'):
+    original_image = imread(str(image_path)) #TCYX
 
-  # plt.imshow(new_img[50,:,:])
-  # plt.show()
-  savename = (Path(output_dir) / (img_info['new_filename'].values[0] + '_corrected.tiff')).resolve()
-  imwrite(savename, new_img.astype('uint8'), imagej=True, metadata={'axes': 'TCYX'},)
+    # match video to dataframe info
+    # finds string match between beginning of string and '_crop'. The group tells it to  only get the first match, not the whole string
+    # img_jump_info = image_info.loc[image_info['new_filename'].str.startswith(re.search('(.*?)\.ome', image_path.stem).group(1))]
+    img_jump_info = jump_info.loc[jump_info['file name'] == img_info['jump_correction'].values[0]]
+    new_img = bound_new_image(img_jump_info, original_image)
+
+    # plt.imshow(new_img[50,:,:])
+    # plt.show()
+    savename = (Path(output_dir) / (img_info['new_filename'].values[0] + '_corrected.tiff')).resolve()
+    imwrite(savename, new_img.astype('uint8'), imagej=True, metadata={'axes': 'TCYX'},)
 
 
   # # create the stack

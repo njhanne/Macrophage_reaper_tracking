@@ -59,11 +59,12 @@ show_output = False
 channel_to_process = 3
 
 # Image files to analyse.
-directory_to_process = os.path.normpath("C:/Users/njhan/Box/Collaboration/macrophage_video")
-file_paths = find_all_filepaths(directory_to_process, '.tif')
+directory_to_process = os.path.normpath("C:/Users/njhan/Box/macrophage_coculture/processed/stabilized_tiffs")
+file_paths = find_all_filepaths(directory_to_process, '.tiff')
+print(file_paths)
 
 
-# ------------------------------------------------------
+# -------------------------------------------------------
 # 	ACTUAL CODE.
 # ------------------------------------------------------
 def run(image_file):
@@ -94,8 +95,8 @@ def run(image_file):
   settings.detectorSettings['OPTIONAL_CHANNEL_2'] = 0
   settings.detectorSettings['CELLPOSE_PYTHON_FILEPATH'] = "C:/Users/njhan/anaconda3/envs/Branches/python.exe"
   settings.detectorSettings['CELLPOSE_MODEL'] = PretrainedModel.CUSTOM
-  settings.detectorSettings['CELLPOSE_MODEL_FILEPATH'] = "C:\Users\njhan\Box\Collaboration\macrophage_video\NH_LB_LC1_HL1"
-  settings.detectorSettings['CELL_DIAMETER'] = 30.0
+  settings.detectorSettings['CELLPOSE_MODEL_FILEPATH'] = "C:/Users/njhan/Box/macrophage_coculture/Cellpose_training/models/NH_LB_LC1_HL2"
+  settings.detectorSettings['CELL_DIAMETER'] = 42.0
   settings.detectorSettings['USE_GPU'] = True
   settings.detectorSettings['SIMPLIFY_CONTOURS'] = False
 
@@ -103,7 +104,7 @@ def run(image_file):
   settings.trackerFactory = SparseLAPTrackerFactory()
   settings.trackerSettings = settings.trackerFactory.getDefaultSettings()
 
-  settings.trackerSettings['LINKING_MAX_DISTANCE'] = 70.0
+  settings.trackerSettings['LINKING_MAX_DISTANCE'] = 100.0
   settings.trackerSettings['GAP_CLOSING_MAX_DISTANCE'] = 10.0
   settings.trackerSettings['MAX_FRAME_GAP'] = 3
   settings.initialSpotFilterValue = -1.
@@ -169,7 +170,7 @@ def run(image_file):
   lblImg = LabelImgExporter()
   lblImg.createLabelImagePlus(trackmate, False, False, True, logger).show()
   c = WindowManager.getCurrentImage()
-  IJ.save(c, "C:/Users/njhan/Box/Collaboration/macrophage_video/" + c.getTitle())
+  IJ.save(c, "C:/Users/njhan/Box/macrophage_coculture/processed/" + c.getTitle())
   c.close()
 
   # ----------------
