@@ -1,4 +1,5 @@
 import numpy as np
+import numpy.ma
 from skimage.graph import pixel_graph
 from skimage import segmentation
 import pandas as pd
@@ -36,6 +37,8 @@ def find_neighbors(label_mask, connectivity = 2):
 
 def find_touching_cells(mask, connectivity = 2):
   # connectivity count diagonals in 2D
+  # https://scikit-image.org/docs/stable/api/skimage.graph.html#skimage.graph.pixel_graph
+
   g, nodes = pixel_graph(mask, mask=mask.astype(bool), connectivity=connectivity)
 
   g.eliminate_zeros()
@@ -52,32 +55,31 @@ def find_touching_cells(mask, connectivity = 2):
   pairs = defaultdict(list)
   for pair in touching_masks:
     if pair[0] != pair[1]:
-     pairs[pair[0]].append(pair[1])
+     pairs[int(pair[0])].append(int(pair[1]))
   return pairs
 
 
-def find_distant_neighbors(label_mask, target_cells, distance):
-  # may need a + or - here as the labelimage and xml are 1 off
-  original_target_mask = np.zeros_like(label_mask)
-  # for frame in range(label_mask.shape[0]):
-    # original_target_mask[frame,:,:] = np.isin(label_mask[frame,:,:],  [corrections[frame][x] for x in target_cells[frame]]) * label_mask[frame,:,:]
-  # original_target_mask = np.isin(label_mask, target_cells) * label_mask
+def find_distant_neighbors(label_mask, distance, target=None):
   # 0.65 um xy pixel
   distance_pixel = distance / 0.65
 
   # this works in 3D but I don't think we want it to since it is time not z, should loop over each t slice
   matches = defaultdict(dict)
   for frame in range(label_mask.shape[0]):
-    frame_macs = np.unique(original_target_mask[frame,:,:])
-    expanded_mask = segmentation.expand_labels(original_target_mask[frame,:,:], distance_pixel)
-    # overlapping_stain = np.logical_and(label_mask[frame,:,:], expanded_mask)
-    # overlap_cells = np.unique(label_mask[frame,:,:][overlapping_stain])
-    for mac in frame_macs:
-      if mac != 0:
-        matched_cells = np.unique(label_mask[frame,:,:][np.where(expanded_mask == mac)])
-        matched_cells = matched_cells[(matched_cells != 0) & (matched_cells != mac)]
-        if matched_cells.size != 0:
-          matches[frame][mac] = matched_cells
+    if target != None:
+      frame_cells = np.array(target[frame]) + 1 # add 1 for the labelimage xml offset
+      target_mask = np.where(np.isin(label_mask[frame,:,:], frame_cells), label_mask[frame,:,:], 0)
+      expanded_mask = segmentation.expand_labels(target_mask, distance_pixel)
+    else:
+      frame_cells = np.unique(label_mask[frame,:,:])
+      frame_cells = frame_cells[~np.isin(frame_cells, [0])] # gets rid of background
+      expanded_mask = segmentation.expand_labels(label_mask[frame, :, :], distance_pixel)
+
+    for cell in frame_cells:
+      matched_cells = np.unique(label_mask[frame,:,:][np.where(expanded_mask == cell)])
+      matched_cells = matched_cells[(matched_cells != 0) & (matched_cells != cell)]
+      if matched_cells.size != 0:
+        matches[frame][cell] = matched_cells
   return matches
 
 
@@ -149,31 +151,31 @@ def find_cells_greater_than_prop(tmxml, cell_propertyname, limit):
   return cells
 
 
-def get_label_correction(label_mask, tmxml):
-  # probably deprecated now that the labelimages are 32 bit. We'll see!
-  corrections = defaultdict(dict)
-  rev_corrections = defaultdict(dict)
-
-  cell_id_c = tmxml.spotheader.index('ID')
-  positionx_c = tmxml.spotheader.index('POSITION_X')
-  positiony_c = tmxml.spotheader.index('POSITION_Y')
-  frame_c = tmxml.spotheader.index('FRAME')
-
-  first_cell_id = min(tmxml.spots[:,cell_id_c])
-  first_cell_i = np.where(tmxml.spots[:,cell_id_c] == first_cell_id)[0][0]
-
-  label_start = label_mask[int(tmxml.spots[first_cell_i,frame_c]), int(tmxml.spots[first_cell_i,positiony_c]), int(tmxml.spots[first_cell_i,positionx_c])]
-  label_delta = label_start - first_cell_id #is it always 16bit? probably how it's coded in trackmate...
-  turnover_id = 65536 - label_start + first_cell_id # when it turns over we will lose a cell because it's mask is saved as 0, which is background
-
-  for frame in range(label_mask.shape[0]):
-    for cell_i in np.where(tmxml.spots[:,frame_c] == frame)[0]:
-      corresponding_label = (tmxml.spots[cell_i,cell_id_c] + label_delta) % 65536
-      if corresponding_label == 0:
-        corresponding_label = 65537
-      corrections[frame][tmxml.spots[cell_i,cell_id_c]] = corresponding_label
-    rev_corrections[frame] = {v: k for k, v in corrections[frame].items()}
-  return corrections, rev_corrections
+# def get_label_correction(label_mask, tmxml):
+#   # probably deprecated now that the labelimages are 32 bit. We'll see!
+#   corrections = defaultdict(dict)
+#   rev_corrections = defaultdict(dict)
+#
+#   cell_id_c = tmxml.spotheader.index('ID')
+#   positionx_c = tmxml.spotheader.index('POSITION_X')
+#   positiony_c = tmxml.spotheader.index('POSITION_Y')
+#   frame_c = tmxml.spotheader.index('FRAME')
+#
+#   first_cell_id = min(tmxml.spots[:,cell_id_c])
+#   first_cell_i = np.where(tmxml.spots[:,cell_id_c] == first_cell_id)[0][0]
+#
+#   label_start = label_mask[int(tmxml.spots[first_cell_i,frame_c]), int(tmxml.spots[first_cell_i,positiony_c]), int(tmxml.spots[first_cell_i,positionx_c])]
+#   label_delta = label_start - first_cell_id #is it always 16bit? probably how it's coded in trackmate...
+#   turnover_id = 65536 - label_start + first_cell_id # when it turns over we will lose a cell because it's mask is saved as 0, which is background
+#
+#   for frame in range(label_mask.shape[0]):
+#     for cell_i in np.where(tmxml.spots[:,frame_c] == frame)[0]:
+#       corresponding_label = (tmxml.spots[cell_i,cell_id_c] + label_delta) % 65536
+#       if corresponding_label == 0:
+#         corresponding_label = 65537
+#       corrections[frame][tmxml.spots[cell_i,cell_id_c]] = corresponding_label
+#     rev_corrections[frame] = {v: k for k, v in corrections[frame].items()}
+#   return corrections, rev_corrections
 
 
 # End xml helpers
@@ -194,11 +196,11 @@ def get_frame_stats(tmxml, macrophages, apoptotic_cells, touching_cells, neighbo
     # from the list of cells that are touching, which are macrophages, i.e. which macrophages are touching cells
     afs[frame]['mac_touch'] = set(touching_cells[frame]) & set(afs[frame]['macrophages'])
     # from the list of cells that are neighbors, which are macrophages, i.e. which macrophages are near cells
-    afs[frame]['mac_neighbor'] = list(neighbors[frame].keys())
+    afs[frame]['mac_neighbor'] = set(neighbors[frame]) & set(macrophages[frame])
     # from the touching list, which are dying
     afs[frame]['dead_touch'] = set(touching_cells[frame]) & set(afs[frame]['apoptotic'])
     # from the neighbor list, which are dying
-    afs[frame]['dead_neighbor'] = set(touching_cells[frame]) & set(afs[frame]['apoptotic'])
+    afs[frame]['dead_mac_neighbor'] = set(neighbors[frame]) & set(afs[frame]['apoptotic'])
     # of the macrophages touching cells, which are touching apoptic cells?
     cells_macrophages_touch = [touching_cells[frame][x] for x in afs[frame]['mac_touch']]
     cells_macrophages_touch = [cell for cells in cells_macrophages_touch for cell in cells] #flatten list
@@ -207,30 +209,38 @@ def get_frame_stats(tmxml, macrophages, apoptotic_cells, touching_cells, neighbo
     cells_macrophages_neighbor = [neighbors[frame][x] for x in afs[frame]['mac_neighbor']]
     cells_macrophages_neighbor = [cell for cells in cells_macrophages_neighbor for cell in cells] #flatten list
     afs[frame]['mac_dead_neighbor'] = set(cells_macrophages_neighbor) & set(afs[frame]['apoptotic'])
-
   return(afs)
 
+
+def temp_cell_tracks_builder(cell_dict, LUT, type):
+  if type == 'apoptotic':
+    tall_dict = [(i, k) for i, j in enumerate(cell_dict) for k in j]
+    col_names = ["cell_id", 'apoptotic_frames', 'apoptotic_spots']
+  elif type == 'macrophages':
+    tall_dict = [(i, k) for i,j in enumerate(list(cell_dict.values())) for k in j]
+    col_names = ["cell_id", 'macrophage_frames', 'macrophage_spots']
+  temp_df = pd.DataFrame(tall_dict) # convert to df
+  temp_df['cell_id'] = temp_df[1].map(LUT) #convert spots to track-cells
+  temp_df['cell_id'] = pd.to_numeric(temp_df['cell_id'], downcast='integer') # get rid of 'series' datatype
+  temp_df = temp_df.groupby('cell_id').agg(lambda x: list(x)) # group them up in lists by cell_id
+  temp_df = temp_df.rename_axis("cell_id").reset_index() # get rid of 'rownames'
+  temp_df.columns = col_names # set new colnames
+  return temp_df
+
+
 def get_cell_stats(tmxml, cell_tracks, cell_spot_LUT, macrophages, apoptotic_cells, touching_cells, distant_neighbors, n_frames, all_frame_stats):
-  print('test')
   # apoptotic spots & frames
-  apoptitic_tall = [(i, k) for i, j in enumerate(apoptotic_cells) for k in j]
-  apoptotic_df = pd.DataFrame(apoptitic_tall)
-  apoptotic_df['cell_id'] = apoptotic_df[1].map(cell_spot_LUT)
-  apoptotic_df['cell_id'] = pd.to_numeric(apoptotic_df['cell_id'], downcast='integer')
-  apoptotic_df = apoptotic_df.groupby('cell_id').agg(lambda x: list(x))
-  apoptotic_df = apoptotic_df.rename_axis("cell_id").reset_index()
-  apoptotic_df.columns = ["cell_id", 'apoptotic_frames', 'apoptotic_spots']
-  temp_cell_tracks = cell_tracks.merge(apoptotic_df, on='cell_id', how='outer')
+  temp_cell_tracks = temp_cell_tracks_builder(apoptotic_cells, cell_spot_LUT, 'apoptotic')
+  cell_tracks = cell_tracks.merge(temp_cell_tracks, on='cell_id', how='outer') # outer merge into cell_track df
+  # macrophage spots & frames
+  temp_cell_tracks = temp_cell_tracks_builder(macrophages, cell_spot_LUT, 'macrophages')
+  cell_tracks = cell_tracks.merge(temp_cell_tracks, on='cell_id', how='outer') # outer merge into cell_track df
 
-  macrophages_tall = [(i, k) for i,j in enumerate(list(macrophages.values())) for k in j]
-  macrophage_df = pd.DataFrame(macrophages_tall)
-  macrophage_df['cell_id'] = macrophage_df[1].map(cell_spot_LUT)
-  macrophage_df['cell_id'] = pd.to_numeric(macrophage_df['cell_id'], downcast='integer')
-  macrophage_df = macrophage_df.groupby('cell_id').agg(lambda x: list(x))
-  macrophage_df = macrophage_df.rename_axis("cell_id").reset_index()
-  macrophage_df.columns = ["cell_id", 'macrophage_frames', 'macrophage_spots']
-  temp_cell_tracks = cell_tracks.merge(macrophage_df, on='cell_id', how='outer')
+  tall_touching_cells = [(i, k, l) for i, j in enumerate(list(touching_cells.values())) for k, l in j.items()]
+  touching_cells_df = pd.DataFrame(tall_touching_cells)
 
+
+  print('test')
 
 
 
@@ -272,7 +282,7 @@ for frame in range(len(apoptotic_cells1)):
 # tracks have two columns, the first is the 'source' and the second is 'target',
 # which I assume means spot index at t[x] and spot index at t[x+1]
 
-distant_neighbors = find_distant_neighbors(label_mask, macrophages, 20)
+distant_neighbors = find_distant_neighbors(label_mask, 20)
 all_frame_stats = get_frame_stats(tmxml, macrophages, apoptotic_cells, touching_cells, distant_neighbors, len(label_mask))
 
 cell_tracks = create_cell_tracks(tmxml, all_frame_stats)
