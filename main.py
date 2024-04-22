@@ -3,6 +3,8 @@ import numpy.ma
 from skimage.graph import pixel_graph
 from skimage import segmentation
 import pandas as pd
+import matplotlib
+matplotlib.use("qt5agg")
 import matplotlib.pyplot as plt
 import pickle
 
@@ -55,7 +57,8 @@ def find_touching_cells(mask, connectivity = 2):
   pairs = defaultdict(list)
   for pair in touching_masks:
     if pair[0] != pair[1]:
-     pairs[int(pair[0])].append(int(pair[1]))
+      # label mask and xml spot id are 1 off from each other
+     pairs[int(pair[0] -1)].append(int(pair[1] - 1))
   return pairs
 
 
@@ -68,18 +71,18 @@ def find_distant_neighbors(label_mask, distance, target=None):
   for frame in range(label_mask.shape[0]):
     if target != None:
       frame_cells = np.array(target[frame]) + 1 # add 1 for the labelimage xml offset
-      target_mask = np.where(np.isin(label_mask[frame,:,:], frame_cells), label_mask[frame,:,:], 0)
-      expanded_mask = segmentation.expand_labels(target_mask, distance_pixel)
+
     else:
       frame_cells = np.unique(label_mask[frame,:,:])
       frame_cells = frame_cells[~np.isin(frame_cells, [0])] # gets rid of background
-      expanded_mask = segmentation.expand_labels(label_mask[frame, :, :], distance_pixel)
 
     for cell in frame_cells:
-      matched_cells = np.unique(label_mask[frame,:,:][np.where(expanded_mask == cell)])
-      matched_cells = matched_cells[(matched_cells != 0) & (matched_cells != cell)]
-      if matched_cells.size != 0:
-        matches[frame][cell] = matched_cells
+      target_mask = np.where(np.isin(label_mask[frame, :, :], cell), label_mask[frame, :, :], 0)
+      expanded_mask = segmentation.expand_labels(target_mask, distance_pixel)
+      matched_cells = np.unique(np.ma.masked_where(expanded_mask != cell, label_mask[frame,:,:])).data
+      if matched_cells.size > 3: # this is so dumb but I think needed
+        matched_cells = matched_cells[(matched_cells != 0) & (matched_cells != cell)]
+        matches[frame][cell - 1] = matched_cells - 1
   return matches
 
 
@@ -212,19 +215,44 @@ def get_frame_stats(tmxml, macrophages, apoptotic_cells, touching_cells, neighbo
   return(afs)
 
 
-def temp_cell_tracks_builder(cell_dict, LUT, type):
+def temp_cell_tracks_builder(cell_dict, LUT, type, other_dict=None):
   if type == 'apoptotic':
     tall_dict = [(i, k) for i, j in enumerate(cell_dict) for k in j]
     col_names = ["cell_id", 'apoptotic_frames', 'apoptotic_spots']
   elif type == 'macrophages':
     tall_dict = [(i, k) for i,j in enumerate(list(cell_dict.values())) for k in j]
     col_names = ["cell_id", 'macrophage_frames', 'macrophage_spots']
-  temp_df = pd.DataFrame(tall_dict) # convert to df
-  temp_df['cell_id'] = temp_df[1].map(LUT) #convert spots to track-cells
-  temp_df['cell_id'] = pd.to_numeric(temp_df['cell_id'], downcast='integer') # get rid of 'series' datatype
-  temp_df = temp_df.groupby('cell_id').agg(lambda x: list(x)) # group them up in lists by cell_id
-  temp_df = temp_df.rename_axis("cell_id").reset_index() # get rid of 'rownames'
-  temp_df.columns = col_names # set new colnames
+  elif type == 'touching':
+    tall_dict = [(i, k, l) for i, j in enumerate(list(cell_dict.values())) for k, l in j.items()]
+    col_names = ["cell_id", 'touching_frames', 'touching_cells']
+  elif type == 'neighboring':
+    tall_dict = [(i, k, l) for i, j in enumerate(list(cell_dict.values())) for k, l in j.items()]
+    col_names = ["cell_id", 'neighbor_frames', 'neighbor_cells']
+    touch_tall_dict = [(i, k, l) for i, j in enumerate(list(other_dict.values())) for k, l in j.items()]
+
+  temp_df = pd.DataFrame(tall_dict)  # convert to df
+  if type == 'touching' or type == 'neighboring':
+    # column '2' contains lists of all touching cells. This fn will 'flatten' and replicate the other columns.
+    temp_df = temp_df.explode(2)  # this is amazing! I am so happy this function exists
+    if type == 'neighboring':
+      # this will remove all the neighbors that are actually touching (duplicate from other list)
+      touch_temp_df = pd.DataFrame(touch_tall_dict)  # convert to df
+      touch_temp_df = touch_temp_df.explode(2)
+      exclude_list = temp_df.merge(touch_temp_df, on=[0,1,2], how='outer', indicator=True)
+      temp_df = touch_temp_df.loc[exclude_list._merge == 'left_only']
+    temp_df[1] = temp_df[1].map(LUT)
+    temp_df[1] = pd.to_numeric(temp_df[1], downcast='integer')
+    temp_df[2] = temp_df[2].map(LUT)
+    temp_df[2] = pd.to_numeric(temp_df[2], downcast='integer')
+    temp_df = temp_df.groupby([1]).agg(lambda x: list(x)) # group them up in lists by cell_id
+    temp_df = temp_df.rename_axis("cell_id").reset_index() # get rid of 'rownames'
+    temp_df.columns = col_names # set new colnames
+  else:
+    temp_df['cell_id'] = temp_df[1].map(LUT) #convert spots to track-cells
+    temp_df['cell_id'] = pd.to_numeric(temp_df['cell_id'], downcast='integer') # get rid of 'series' datatype
+    temp_df = temp_df.groupby('cell_id').agg(lambda x: list(x)) # group them up in lists by cell_id
+    temp_df = temp_df.rename_axis("cell_id").reset_index() # get rid of 'rownames'
+    temp_df.columns = col_names # set new colnames
   return temp_df
 
 
@@ -232,13 +260,18 @@ def get_cell_stats(tmxml, cell_tracks, cell_spot_LUT, macrophages, apoptotic_cel
   # apoptotic spots & frames
   temp_cell_tracks = temp_cell_tracks_builder(apoptotic_cells, cell_spot_LUT, 'apoptotic')
   cell_tracks = cell_tracks.merge(temp_cell_tracks, on='cell_id', how='outer') # outer merge into cell_track df
+
   # macrophage spots & frames
   temp_cell_tracks = temp_cell_tracks_builder(macrophages, cell_spot_LUT, 'macrophages')
+  cell_tracks = cell_tracks.merge(temp_cell_tracks, on='cell_id', how='outer')
+
+  # touching cells
+  temp_cell_tracks = temp_cell_tracks_builder(touching_cells, cell_spot_LUT, 'touching')
+  cell_tracks = cell_tracks.merge(temp_cell_tracks, on='cell_id', how='outer')
+
+  # neighboring cells (this doesn't seem to work right now)
+  temp_cell_tracks = temp_cell_tracks_builder(distant_neighbors, cell_spot_LUT, 'neighboring', touching_cells)
   cell_tracks = cell_tracks.merge(temp_cell_tracks, on='cell_id', how='outer') # outer merge into cell_track df
-
-  tall_touching_cells = [(i, k, l) for i, j in enumerate(list(touching_cells.values())) for k, l in j.items()]
-  touching_cells_df = pd.DataFrame(tall_touching_cells)
-
 
   print('test')
 
@@ -282,12 +315,14 @@ for frame in range(len(apoptotic_cells1)):
 # tracks have two columns, the first is the 'source' and the second is 'target',
 # which I assume means spot index at t[x] and spot index at t[x+1]
 
-distant_neighbors = find_distant_neighbors(label_mask, 20)
+distant_neighbors = find_distant_neighbors(label_mask, 30)
 all_frame_stats = get_frame_stats(tmxml, macrophages, apoptotic_cells, touching_cells, distant_neighbors, len(label_mask))
 
 cell_tracks = create_cell_tracks(tmxml, all_frame_stats)
 cell_spot_LUT = make_cell_spot_LUT(cell_tracks, tmxml)
 all_cell_stats = get_cell_stats(tmxml, cell_tracks, cell_spot_LUT, macrophages, apoptotic_cells, touching_cells, distant_neighbors, len(label_mask), all_frame_stats)
+
+all_cell_stats.to_csv('test.csv')
 
 with open('test_48_24.pickle', 'wb') as handle:
   pickle.dump(all_frame_stats, handle, protocol=pickle.HIGHEST_PROTOCOL)
