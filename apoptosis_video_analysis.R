@@ -54,7 +54,6 @@ df_test <- df_test %>% mutate(frame_count = case_when(frame_count == 0 ~ parent_
 # I think if they are macrophage+ 2/3 of the time, they are macrophages.
 # They likely won't be 100% of the time because of how the fluorescent 
 # detection works with trackmate and python
-# TODO: need to make a way for them to stop being macrophages after a child
 # event if they are no longer fluorescing
 df_test$mac_frame_ratio <- define_cell_type(df_test, 'macrophage_frames')
 df_test <- df_test %>% mutate(mac_bool = case_when(mac_frame_ratio > 0.66 ~ TRUE,
@@ -80,8 +79,11 @@ dying_ratio <- total_dying / nrow(df_test) * 100
 # touching_cells: [3,6,1] and touching_frames: [1,1,2]
 # means taht in frame 1 it is touching cell 3 and 6 and in frame 2 it touches cell 1
 # we can just make another list of booleans of whether the touch was a mac or not
+
 # we want the touch history to be transferred to children as well, but only from
 # before they split... this is a fun complicated problem!
+# actually it's even more complicated than that. All parents cease to exist after children split so probably should not
+# even be considered cells. Also that means that children have technically been touching the entire parent line...
 
 # first make the mac_touch bool
 # temp <- df_test %>% filter(map_lgl(cell_id, ~ any(unlist(test['touching_cells']) %in% .x)))
@@ -92,8 +94,40 @@ for (i in 1:nrow(df_test)) {
   }
 }
 
+# first mac touch
+# this is so damn ugly my god
+df_test['first_mac_touch'] <- unlist(lapply(df_test['touching_mac'][[1]], function(x) match('TRUE', x[[1]])))
+df_test['first_mac_touch'] <- apply(df_test, 1, function(x) {
+  ifelse(is.na(x['first_mac_touch']), NA, x['touching_frames'][[1]][ x['first_mac_touch'][[1]][[1]][1] ] )})
+
+# first apoptosis
+df_test <- df_test %>% rowwise() %>% mutate(first_apoptosis = ifelse(!is.null(apoptotic_frames[1][[1]]), unlist(apoptotic_frames[1][[1]]),  NA))
+
+# first touch
+df_test <- df_test %>% rowwise() %>% mutate(first_touch = ifelse(!is.null(touching_frames[1][[1]]), unlist(touching_frames[1][[1]]),  NA))
 
 
+# last mac touch before apoptosis
+
+# t between mac touch and apoptosis
+df_test <- df_test %>% mutate(reaper_time = case_when((!is.na(first_apoptosis) & !is.na(first_mac_touch)) ~ first_apoptosis - first_mac_touch,
+                                                      TRUE ~ NA))
+# t between any touch and apoptosis
+df_test <- df_test %>% mutate(pre_death_touch_time = case_when((!is.na(first_apoptosis) & !is.na(first_touch)) ~ first_apoptosis - first_touch,
+                                                      TRUE ~ NA))
 
 
+### does touching make them die?
+total_mac_touch <- df_test %>% filter(!is.na(first_mac_touch)) %>% nrow()
+total_reaped <- df_test %>% filter(reaper_time >= 0) %>% nrow()
 
+reaper_ratio <- total_reaped / total_dying * 100
+
+# likelihood of any cell dying w/o mac touch
+not_reaped_ratio <- df_test %>% filter(is.na(first_mac_touch) & (dying_bool == TRUE)) %>% nrow() / nrow(df_test) * 100
+# likelihood of any cell dying touched by not mac
+touched_not_mac_before_dying <- df_test %>% filter(pre_death_touch_time >= 0 & (reaper_time < 0 | is.na(reaper_time))) %>% nrow()
+total_not_mac_touch <- df_test %>% filter(!is.na(first_touch) & (reaper_time < 0 | is.na(reaper_time))) %>% nrow()
+touched_not_mac_dying_ratio <- touched_not_mac_before_dying / total_not_mac_touch * 100
+# likelinhood of cells touched by macrophages dying
+reaped_ratio <- total_reaped / total_mac_touch * 100
