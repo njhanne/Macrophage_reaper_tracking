@@ -103,6 +103,7 @@ def get_all_tracks(tmxml, id_range=[], duplicate_split=True, break_split=True):
 
 def create_cell_tracks(tmxml, all_frame_stats):
   tracks = get_all_tracks(tmxml)
+  child_track_alt = get_all_tracks(tmxml, [], False, True)
   cell_id = 0
   all_cells = []
   for track in tracks: # loop through all the tracks
@@ -111,13 +112,16 @@ def create_cell_tracks(tmxml, all_frame_stats):
       cell_track['original_track_id'] = track # for making LUT later
       cell_track['cell_id'] = cell_id + cell.cell # make a new unique track/cell id for all the cells in the video
       cell_track['spot_ids'] = list(cell.spotids) # get all the spots in the track
+      cell_track['frames'] = list(tmxml.getproperty(cell_track['spot_ids'], 'FRAME')) # get the frame # of each spot
       if cell.parent != 0:
         cell_track['parent_id'] = cell_id + cell.parent
+        cell_track['independent_spot_ids'] = list(child_track_alt[track][cell.cell - 1].spotids)
+        cell_track['independent_frames'] = list(tmxml.getproperty(cell_track['independent_spot_ids'], 'FRAME')) # get the frame # of each spot
       else:
         cell_track['parent_id'] = None
+        cell_track['independent_spot_ids'] = None
+        cell_track['independent_frames'] = None
       all_cells.append(cell_track)
-      cell_track['frames'] = list(tmxml.getproperty(cell_track['spot_ids'], 'FRAME')) # get the frame # of each spot
-
     cell_id += len(tracks[track])
   return pd.DataFrame(all_cells) # very convenient we can convert list/dict to dataframe, good for csv export
 
@@ -184,7 +188,7 @@ def find_cells_greater_than_prop(tmxml, cell_propertyname, limit):
 # End xml helpers
 
 # Analysis Helpers
-def get_frame_stats(tmxml, macrophages, apoptotic_cells, touching_cells, neighbors, n_frames):
+def get_frame_stats(tmxml, macrophages, apoptotic_cells, touching_cells, n_frames, neighbors=None):
   afs = defaultdict(dict)
   frame_c = tmxml.spotheader.index('FRAME')
   for frame in range(n_frames):
@@ -197,21 +201,22 @@ def get_frame_stats(tmxml, macrophages, apoptotic_cells, touching_cells, neighbo
     # which of these are known apoptotic
     afs[frame]['apoptotic'] = set(afs[frame]['cells_label']) & set(apoptotic_cells[frame]) # finds matches
     # from the list of cells that are touching, which are macrophages, i.e. which macrophages are touching cells
-    afs[frame]['mac_touch'] = set(touching_cells[frame]) & set(afs[frame]['macrophages'])
-    # from the list of cells that are neighbors, which are macrophages, i.e. which macrophages are near cells
-    afs[frame]['mac_neighbor'] = set(neighbors[frame]) & set(macrophages[frame])
-    # from the touching list, which are dying
-    afs[frame]['dead_touch'] = set(touching_cells[frame]) & set(afs[frame]['apoptotic'])
-    # from the neighbor list, which are dying
-    afs[frame]['dead_mac_neighbor'] = set(neighbors[frame]) & set(afs[frame]['apoptotic'])
-    # of the macrophages touching cells, which are touching apoptic cells?
-    cells_macrophages_touch = [touching_cells[frame][x] for x in afs[frame]['mac_touch']]
-    cells_macrophages_touch = [cell for cells in cells_macrophages_touch for cell in cells] #flatten list
-    afs[frame]['mac_dead_touch'] = set(cells_macrophages_touch) & set(afs[frame]['apoptotic'])
-    # of the macrophages neighboring cells, which are neighboring apoptic cells?
-    cells_macrophages_neighbor = [neighbors[frame][x] for x in afs[frame]['mac_neighbor']]
-    cells_macrophages_neighbor = [cell for cells in cells_macrophages_neighbor for cell in cells] #flatten list
-    afs[frame]['mac_dead_neighbor'] = set(cells_macrophages_neighbor) & set(afs[frame]['apoptotic'])
+
+    # afs[frame]['mac_touch'] = set(touching_cells[frame]) & set(afs[frame]['macrophages'])
+    # # from the list of cells that are neighbors, which are macrophages, i.e. which macrophages are near cells
+    # afs[frame]['mac_neighbor'] = set(neighbors[frame]) & set(macrophages[frame])
+    # # from the touching list, which are dying
+    # afs[frame]['dead_touch'] = set(touching_cells[frame]) & set(afs[frame]['apoptotic'])
+    # # from the neighbor list, which are dying
+    # afs[frame]['dead_mac_neighbor'] = set(neighbors[frame]) & set(afs[frame]['apoptotic'])
+    # # of the macrophages touching cells, which are touching apoptic cells?
+    # cells_macrophages_touch = [touching_cells[frame][x] for x in afs[frame]['mac_touch']]
+    # cells_macrophages_touch = [cell for cells in cells_macrophages_touch for cell in cells] #flatten list
+    # afs[frame]['mac_dead_touch'] = set(cells_macrophages_touch) & set(afs[frame]['apoptotic'])
+    # # of the macrophages neighboring cells, which are neighboring apoptic cells?
+    # cells_macrophages_neighbor = [neighbors[frame][x] for x in afs[frame]['mac_neighbor']]
+    # cells_macrophages_neighbor = [cell for cells in cells_macrophages_neighbor for cell in cells] #flatten list
+    # afs[frame]['mac_dead_neighbor'] = set(cells_macrophages_neighbor) & set(afs[frame]['apoptotic'])
   return(afs)
 
 
@@ -244,19 +249,21 @@ def temp_cell_tracks_builder(cell_dict, LUT, type, other_dict=None):
     temp_df[1] = pd.to_numeric(temp_df[1], downcast='integer')
     temp_df[2] = temp_df[2].map(LUT)
     temp_df[2] = pd.to_numeric(temp_df[2], downcast='integer')
+    temp_df = temp_df.dropna()
     temp_df = temp_df.groupby([1]).agg(lambda x: list(x)) # group them up in lists by cell_id
     temp_df = temp_df.rename_axis("cell_id").reset_index() # get rid of 'rownames'
     temp_df.columns = col_names # set new colnames
   else:
     temp_df['cell_id'] = temp_df[1].map(LUT) #convert spots to track-cells
     temp_df['cell_id'] = pd.to_numeric(temp_df['cell_id'], downcast='integer') # get rid of 'series' datatype
+    temp_df = temp_df.dropna()
     temp_df = temp_df.groupby('cell_id').agg(lambda x: list(x)) # group them up in lists by cell_id
     temp_df = temp_df.rename_axis("cell_id").reset_index() # get rid of 'rownames'
     temp_df.columns = col_names # set new colnames
   return temp_df
 
 
-def get_cell_stats(tmxml, cell_tracks, cell_spot_LUT, macrophages, apoptotic_cells, touching_cells, distant_neighbors, n_frames, all_frame_stats):
+def get_cell_stats(tmxml, cell_tracks, cell_spot_LUT, macrophages, apoptotic_cells, touching_cells, n_frames, all_frame_stats, distant_neighbors=None):
   # apoptotic spots & frames
   temp_cell_tracks = temp_cell_tracks_builder(apoptotic_cells, cell_spot_LUT, 'apoptotic')
   cell_tracks = cell_tracks.merge(temp_cell_tracks, on='cell_id', how='outer') # outer merge into cell_track df
@@ -270,14 +277,11 @@ def get_cell_stats(tmxml, cell_tracks, cell_spot_LUT, macrophages, apoptotic_cel
   cell_tracks = cell_tracks.merge(temp_cell_tracks, on='cell_id', how='outer')
 
   # neighboring cells (this doesn't seem to work right now)
-  temp_cell_tracks = temp_cell_tracks_builder(distant_neighbors, cell_spot_LUT, 'neighboring', touching_cells)
-  cell_tracks = cell_tracks.merge(temp_cell_tracks, on='cell_id', how='outer') # outer merge into cell_track df
+  if distant_neighbors is not None:
+    temp_cell_tracks = temp_cell_tracks_builder(distant_neighbors, cell_spot_LUT, 'neighboring', touching_cells)
+    cell_tracks = cell_tracks.merge(temp_cell_tracks, on='cell_id', how='outer') # outer merge into cell_track df
 
-  print('test')
-
-
-
-  return temp_cell_tracks
+  return cell_tracks
 
 # End analysis helpers
 
@@ -315,14 +319,14 @@ for frame in range(len(apoptotic_cells1)):
 # tracks have two columns, the first is the 'source' and the second is 'target',
 # which I assume means spot index at t[x] and spot index at t[x+1]
 
-distant_neighbors = find_distant_neighbors(label_mask, 30)
-all_frame_stats = get_frame_stats(tmxml, macrophages, apoptotic_cells, touching_cells, distant_neighbors, len(label_mask))
+# distant_neighbors = find_distant_neighbors(label_mask, 30)
+all_frame_stats = get_frame_stats(tmxml, macrophages, apoptotic_cells, touching_cells, len(label_mask)) #, distant_neighbors)
 
 cell_tracks = create_cell_tracks(tmxml, all_frame_stats)
 cell_spot_LUT = make_cell_spot_LUT(cell_tracks, tmxml)
-all_cell_stats = get_cell_stats(tmxml, cell_tracks, cell_spot_LUT, macrophages, apoptotic_cells, touching_cells, distant_neighbors, len(label_mask), all_frame_stats)
+all_cell_stats = get_cell_stats(tmxml, cell_tracks, cell_spot_LUT, macrophages, apoptotic_cells, touching_cells,  len(label_mask), all_frame_stats) #, distant_neighbors)
 
-all_cell_stats.to_csv('test.csv')
+all_cell_stats.to_csv('test3.csv')
 
 with open('test_48_24.pickle', 'wb') as handle:
   pickle.dump(all_frame_stats, handle, protocol=pickle.HIGHEST_PROTOCOL)
