@@ -4,6 +4,7 @@ library(stringr)
 library(purrr)
 library(tibble)
 library(ggplot2)
+library(cowplot)
 
 
 define_cell_type <- function(temp_df, cell) {
@@ -51,16 +52,13 @@ df_test <- df_test %>% mutate(frame_count = case_when(frame_count == 0 ~ parent_
 
 ### define cells
 # macrophages
-# I think if they are macrophage+ 2/3 of the time, they are macrophages.
+# I think if they are macrophage+ 1/2 of the time, they are macrophages.
 # They likely won't be 100% of the time because of how the fluorescent 
 # detection works with trackmate and python
 # event if they are no longer fluorescing
 df_test$mac_frame_ratio <- define_cell_type(df_test, 'macrophage_frames')
-df_test <- df_test %>% mutate(mac_bool = case_when(mac_frame_ratio > 0.66 ~ TRUE,
+df_test <- df_test %>% mutate(mac_bool = case_when(mac_frame_ratio > 0.5 ~ TRUE,
                                                      .default = FALSE))
-
-total_mac <- df_test %>% filter(mac_bool == TRUE) %>% nrow()
-mac_ratio <- total_mac / nrow(df_test) * 100
 
 # define apoptotic
 # These can be more brief flashes. In the future I may make it where they need to
@@ -69,8 +67,7 @@ df_test$dying_frame_ratio <- define_cell_type(df_test, 'apoptotic_frames')
 # dead_count <- pmin(unlist(lapply(deframe(df_test[,c(3,7)]), function(x) length(x))))
 df_test <- df_test %>% mutate(dying_bool = case_when(dying_frame_ratio > 0 ~ TRUE,
                                                    .default = FALSE))
-total_dying <- df_test %>% filter(dying_bool == TRUE) %>% nrow()
-dying_ratio <- total_dying / nrow(df_test) * 100
+
 
 
 ### when touched
@@ -91,6 +88,26 @@ dying_ratio <- total_dying / nrow(df_test) * 100
 for (i in 1:nrow(df_test)) {
   if (length(df_test[i,'touching_cells'][[1]]) != 0) {
     df_test[i,'touching_mac'] <- enframe(list(unname(do.call("rbind",lapply(unlist(df_test[i,'touching_cells']), function(x) df_test[df_test$cell_id == x,]))['mac_bool'])))[,2]
+  }
+}
+
+# for now this is how we will handle parents/children:
+# consider the parent as just when the children are co-existent
+# they will inherit all the 'touching' as the parent,
+# and then later we won't look at parent cells at all in analysis
+# NOTE: The touching doesn't get inherited to the 'touched'. 
+# I think this is ok...
+
+# Since the loop goes in row order the first children should always run before
+# their own children
+for (i in 1:nrow(df_test)) {
+  if (!is.na(df_test[i,'parent_id'])) {
+    parent_row <- df_test[df_test$cell_id == df_test[i,'parent_id'],]
+    df_test[i,'touching_cells'] <- enframe(list(unlist(c(parent_row['touching_cells'][[1]], df_test[i,'touching_cells'][[1]]))))[,2]
+    df_test[i,'touching_frames'] <- enframe(list(unlist(c(parent_row['touching_frames'][[1]], df_test[i,'touching_frames'][[1]]))))[,2]
+    df_test[i,'neighbor_cells'] <- enframe(list(unlist(c(parent_row['neighbor_cells'][[1]], df_test[i,'neighbor_cells'][[1]]))))[,2]
+    df_test[i,'neighbor_frames'] <- enframe(list(unlist(c(parent_row['neighbor_frames'][[1]], df_test[i,'neighbor_frames'][[1]]))))[,2]
+    df_test[i,'touching_mac'] <- enframe(list(unlist(c(parent_row['touching_mac'][[1]], df_test[i,'touching_mac'][[1]]))))[,2]
   }
 }
 
@@ -117,17 +134,34 @@ df_test <- df_test %>% mutate(pre_death_touch_time = case_when((!is.na(first_apo
                                                       TRUE ~ NA))
 
 
+parents <- unique(df_test$parent_id)
+df_childless <- df_test[-parents[!is.na(parents)],]
 ### does touching make them die?
-total_mac_touch <- df_test %>% filter(!is.na(first_mac_touch)) %>% nrow()
-total_reaped <- df_test %>% filter(reaper_time >= 0) %>% nrow()
+total_dying <- df_childless %>% filter(dying_bool == TRUE) %>% nrow()
+dying_ratio <- total_dying / nrow(df_childless) * 100
+
+total_mac <- df_childless %>% filter(mac_bool == TRUE) %>% nrow()
+mac_ratio <- total_mac / nrow(df_childless) * 100
+
+total_mac_touch <- df_childless %>% filter(!is.na(first_mac_touch)) %>% nrow()
+total_reaped <- df_childless %>% filter(reaper_time >= 0) %>% nrow()
 
 reaper_ratio <- total_reaped / total_dying * 100
 
 # likelihood of any cell dying w/o mac touch
-not_reaped_ratio <- df_test %>% filter(is.na(first_mac_touch) & (dying_bool == TRUE)) %>% nrow() / nrow(df_test) * 100
+not_reaped_ratio <- df_childless %>% filter(is.na(first_mac_touch) & (dying_bool == TRUE)) %>% nrow() / nrow(df_childless) * 100
 # likelihood of any cell dying touched by not mac
-touched_not_mac_before_dying <- df_test %>% filter(pre_death_touch_time >= 0 & (reaper_time < 0 | is.na(reaper_time))) %>% nrow()
-total_not_mac_touch <- df_test %>% filter(!is.na(first_touch) & (reaper_time < 0 | is.na(reaper_time))) %>% nrow()
+touched_not_mac_before_dying <- df_childless %>% filter(pre_death_touch_time >= 0 & (reaper_time < 0 | is.na(reaper_time))) %>% nrow()
+total_not_mac_touch <- df_childless %>% filter(!is.na(first_touch) & (reaper_time < 0 | is.na(reaper_time))) %>% nrow()
 touched_not_mac_dying_ratio <- touched_not_mac_before_dying / total_not_mac_touch * 100
 # likelinhood of cells touched by macrophages dying
 reaped_ratio <- total_reaped / total_mac_touch * 100
+
+
+
+reaper_histogram <- ggplot() + geom_histogram(data = df_childless %>% filter(reaper_time >= 0), aes(x=-reaper_time/(60/8)), alpha=0.5, fill='red') + 
+                 geom_histogram(data = df_childless %>% filter(pre_death_touch_time >= 0 & (reaper_time < 0 | is.na(reaper_time))), aes(x=-pre_death_touch_time/(60/8)), alpha=0.5, fill='black')
+
+# idea https://r-graph-gallery.com/322-custom-colours-in-sankey-diagram.html
+
+
