@@ -2,6 +2,8 @@ import numpy as np
 import numpy.ma
 from skimage.graph import pixel_graph
 from skimage import segmentation
+from scipy.spatial import distance
+
 import pandas as pd
 import matplotlib
 matplotlib.use("qt5agg")
@@ -20,6 +22,7 @@ from trackmatexml import TrackmateXML # I didn't make this!
 import tkinter as tk
 from tkinter import filedialog
 from collections import defaultdict
+import time
 
 ### Neighbor Finding Helpers
 def find_neighbors(label_mask, connectivity = 2):
@@ -86,6 +89,32 @@ def find_distant_neighbors(label_mask, distance, target=None):
   return matches
 
 
+def find_euclidian_neighbors(tmxml, thresh_distance=50):
+  # 0.65 um xy pixel
+  distance_pixel = thresh_distance / 0.65
+
+  matches = defaultdict(dict)
+  # this doesn't maintain order and won't work
+  # [x_col, y_col, frame_col] = np.where(np.isin(tmxml.spotheader, ['POSITION_X', 'POSITION_Y', 'FRAME']))[0]
+  # this does :/
+  frame_col = tmxml.spotheader.index('FRAME')
+  x_col = tmxml.spotheader.index('POSITION_X')
+  y_col = tmxml.spotheader.index('POSITION_Y')
+  slice_indices = [0, x_col, y_col] # id is always 1st col
+  for frame in range(int(max(tmxml.spots[:,frame_col]))):
+    centroid_list = tmxml.spots[tmxml.spots[:,frame_col] == frame][:,slice_indices]
+    # calcs distance between all centroid pairs!
+    distance_matrix = distance.cdist(centroid_list[:,[1,2]], centroid_list[:,[1,2]])
+    # get the ones below distance
+    matches_list = np.argwhere((distance_matrix <= distance_pixel) & (distance_matrix > 0))
+    # match the row/column to the spot id
+    matches_list = np.take(centroid_list[:,0], matches_list) # another banger function! love this!!
+    # group them up
+    matches_list = pd.DataFrame(matches_list).groupby([0]).agg(lambda x: list(x))
+    matches[frame] = matches_list.to_dict()[1]
+  return matches
+
+
 # End neighbor helpers
 
 # xml Helpers
@@ -145,7 +174,6 @@ def make_cell_spot_LUT(cell_tracks, tmxml):
   return LUT
 
 
-
 def find_cells_greater_than_prop(tmxml, cell_propertyname, limit):
   cells  = defaultdict(list)
   property_col = tmxml.spotheader.index(cell_propertyname)
@@ -156,33 +184,6 @@ def find_cells_greater_than_prop(tmxml, cell_propertyname, limit):
     # gets the label id instead of the row number (i)
     cells[tmxml.spots[i,frame_c]].append(tmxml.spots[i,0])
   return cells
-
-
-# def get_label_correction(label_mask, tmxml):
-#   # probably deprecated now that the labelimages are 32 bit. We'll see!
-#   corrections = defaultdict(dict)
-#   rev_corrections = defaultdict(dict)
-#
-#   cell_id_c = tmxml.spotheader.index('ID')
-#   positionx_c = tmxml.spotheader.index('POSITION_X')
-#   positiony_c = tmxml.spotheader.index('POSITION_Y')
-#   frame_c = tmxml.spotheader.index('FRAME')
-#
-#   first_cell_id = min(tmxml.spots[:,cell_id_c])
-#   first_cell_i = np.where(tmxml.spots[:,cell_id_c] == first_cell_id)[0][0]
-#
-#   label_start = label_mask[int(tmxml.spots[first_cell_i,frame_c]), int(tmxml.spots[first_cell_i,positiony_c]), int(tmxml.spots[first_cell_i,positionx_c])]
-#   label_delta = label_start - first_cell_id #is it always 16bit? probably how it's coded in trackmate...
-#   turnover_id = 65536 - label_start + first_cell_id # when it turns over we will lose a cell because it's mask is saved as 0, which is background
-#
-#   for frame in range(label_mask.shape[0]):
-#     for cell_i in np.where(tmxml.spots[:,frame_c] == frame)[0]:
-#       corresponding_label = (tmxml.spots[cell_i,cell_id_c] + label_delta) % 65536
-#       if corresponding_label == 0:
-#         corresponding_label = 65537
-#       corrections[frame][tmxml.spots[cell_i,cell_id_c]] = corresponding_label
-#     rev_corrections[frame] = {v: k for k, v in corrections[frame].items()}
-#   return corrections, rev_corrections
 
 
 # End xml helpers
@@ -202,21 +203,22 @@ def get_frame_stats(tmxml, macrophages, apoptotic_cells, touching_cells, n_frame
     afs[frame]['apoptotic'] = set(afs[frame]['cells_label']) & set(apoptotic_cells[frame]) # finds matches
     # from the list of cells that are touching, which are macrophages, i.e. which macrophages are touching cells
 
-    # afs[frame]['mac_touch'] = set(touching_cells[frame]) & set(afs[frame]['macrophages'])
-    # # from the list of cells that are neighbors, which are macrophages, i.e. which macrophages are near cells
-    # afs[frame]['mac_neighbor'] = set(neighbors[frame]) & set(macrophages[frame])
-    # # from the touching list, which are dying
-    # afs[frame]['dead_touch'] = set(touching_cells[frame]) & set(afs[frame]['apoptotic'])
-    # # from the neighbor list, which are dying
-    # afs[frame]['dead_mac_neighbor'] = set(neighbors[frame]) & set(afs[frame]['apoptotic'])
-    # # of the macrophages touching cells, which are touching apoptic cells?
-    # cells_macrophages_touch = [touching_cells[frame][x] for x in afs[frame]['mac_touch']]
-    # cells_macrophages_touch = [cell for cells in cells_macrophages_touch for cell in cells] #flatten list
-    # afs[frame]['mac_dead_touch'] = set(cells_macrophages_touch) & set(afs[frame]['apoptotic'])
-    # # of the macrophages neighboring cells, which are neighboring apoptic cells?
-    # cells_macrophages_neighbor = [neighbors[frame][x] for x in afs[frame]['mac_neighbor']]
-    # cells_macrophages_neighbor = [cell for cells in cells_macrophages_neighbor for cell in cells] #flatten list
-    # afs[frame]['mac_dead_neighbor'] = set(cells_macrophages_neighbor) & set(afs[frame]['apoptotic'])
+    if neighbors is not None:
+      afs[frame]['mac_touch'] = set(touching_cells[frame]) & set(afs[frame]['macrophages'])
+      # from the list of cells that are neighbors, which are macrophages, i.e. which macrophages are near cells
+      afs[frame]['mac_neighbor'] = set(neighbors[frame]) & set(macrophages[frame])
+      # from the touching list, which are dying
+      afs[frame]['dead_touch'] = set(touching_cells[frame]) & set(afs[frame]['apoptotic'])
+      # from the neighbor list, which are dying
+      afs[frame]['dead_mac_neighbor'] = set(neighbors[frame]) & set(afs[frame]['apoptotic'])
+      # of the macrophages touching cells, which are touching apoptic cells?
+      cells_macrophages_touch = [touching_cells[frame][x] for x in afs[frame]['mac_touch']]
+      cells_macrophages_touch = [cell for cells in cells_macrophages_touch for cell in cells] #flatten list
+      afs[frame]['mac_dead_touch'] = set(cells_macrophages_touch) & set(afs[frame]['apoptotic'])
+      # of the macrophages neighboring cells, which are neighboring apoptic cells?
+      cells_macrophages_neighbor = [neighbors[frame][x] for x in afs[frame]['mac_neighbor']]
+      cells_macrophages_neighbor = [cell for cells in cells_macrophages_neighbor for cell in cells] #flatten list
+      afs[frame]['mac_dead_neighbor'] = set(cells_macrophages_neighbor) & set(afs[frame]['apoptotic'])
   return(afs)
 
 
@@ -300,10 +302,14 @@ tmxml.loadfile(xml_track_path)
 # correction_dictionary, rev_corrections = get_label_correction(label_mask, tmxml)
 
 # find touching cells
+tic = time.time()
 touching_cells = find_neighbors(label_mask, 2)
+toc = time.time()
+print('touching cells took: ' + str(toc - tic))
 
 # find red cells
 # contrast in channel 1 seems to work pretty well. Should be greater than 0.05
+tic = time.time()
 macrophages = find_cells_greater_than_prop(tmxml, 'SNR_CH1', .1)
 #
 # # find green cells
@@ -315,24 +321,35 @@ apoptotic_cells2 = find_cells_greater_than_prop(tmxml, 'MEAN_INTENSITY_CH2', 30)
 apoptotic_cells = []
 for frame in range(len(apoptotic_cells1)):
   apoptotic_cells.append(set(apoptotic_cells1[frame]).intersection(apoptotic_cells2[frame]))
+toc = time.time()
+print('identifying cells took: ' + str(toc - tic))
 
 # tracks have two columns, the first is the 'source' and the second is 'target',
 # which I assume means spot index at t[x] and spot index at t[x+1]
 
+# This method is the most accurate but it is VERY slow since it has to separately look at each labelled cell and expand it
 # distant_neighbors = find_distant_neighbors(label_mask, 30)
-all_frame_stats = get_frame_stats(tmxml, macrophages, apoptotic_cells, touching_cells, len(label_mask)) #, distant_neighbors)
+
+# This method just uses the centroid position to calculate euclidian distance between all the centroids, then matches up
+# the ones below a set threshold. It should be exponentially faster than the more accurate method
+tic = time.time()
+distant_neighbors = find_euclidian_neighbors(tmxml, 50)
+toc = time.time()
+print('finding neighbors took: '+ str(toc - tic))
+
+all_frame_stats = get_frame_stats(tmxml, macrophages, apoptotic_cells, touching_cells, len(label_mask), distant_neighbors)
 
 cell_tracks = create_cell_tracks(tmxml, all_frame_stats)
 cell_spot_LUT = make_cell_spot_LUT(cell_tracks, tmxml)
-all_cell_stats = get_cell_stats(tmxml, cell_tracks, cell_spot_LUT, macrophages, apoptotic_cells, touching_cells,  len(label_mask), all_frame_stats) #, distant_neighbors)
+all_cell_stats = get_cell_stats(tmxml, cell_tracks, cell_spot_LUT, macrophages, apoptotic_cells, touching_cells,  len(label_mask), all_frame_stats, distant_neighbors)
 
-all_cell_stats.to_csv('test3.csv')
+all_cell_stats.to_csv('test4.csv')
 
-with open('test_48_24.pickle', 'wb') as handle:
-  pickle.dump(all_frame_stats, handle, protocol=pickle.HIGHEST_PROTOCOL)
-
-with open('test.pickle', 'rb') as handle:
-  y = pickle.load(handle)
+# with open('test_48_24.pickle', 'wb') as handle:
+#   pickle.dump(all_frame_stats, handle, protocol=pickle.HIGHEST_PROTOCOL)
+#
+# with open('test.pickle', 'rb') as handle:
+#   y = pickle.load(handle)
 
 print('test')
 # for frame in range(len(all_frame_stats)):
