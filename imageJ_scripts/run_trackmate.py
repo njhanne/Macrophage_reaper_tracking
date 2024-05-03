@@ -105,7 +105,7 @@ def run(image_file):
   settings.trackerSettings = settings.trackerFactory.getDefaultSettings()
 
   settings.trackerSettings['LINKING_MAX_DISTANCE'] = 100.0
-  settings.trackerSettings['GAP_CLOSING_MAX_DISTANCE'] = 10.0
+  settings.trackerSettings['GAP_CLOSING_MAX_DISTANCE'] = 30.0
   settings.trackerSettings['MAX_FRAME_GAP'] = 3
   settings.initialSpotFilterValue = -1.
 

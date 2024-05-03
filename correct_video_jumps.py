@@ -27,7 +27,8 @@ def initialize_image(x_size, y_size, t_size, c_size, jump_info):
   y_range = max(np.append(jump_info['cumulative_y'].values, 0)) - min(np.append(jump_info['cumulative_y'].values, 0))
   x_range = max(np.append(jump_info['cumulative_x'].values, 0)) - min(np.append(jump_info['cumulative_x'].values, 0))
   # later, instead of zeros, I think it may make more sense to have it be 'average' pixel intensity background
-  return np.zeros((t_size, c_size, y_size+y_range, x_size+x_range))
+  # if you don't specify 8bit it chooses 64 bits LMAO
+  return np.zeros((t_size, c_size, y_size+y_range, x_size+x_range), dtype='uint8')
 
 
 def jump_image(og_img, new_image, jump_info, x_size, y_size, t_size):
@@ -66,7 +67,7 @@ def bound_new_image(jump_info, og_img):
 # I may just use the same jump info for all vids
 
 data_dir = (Path.cwd() / 'data').resolve()
-process_dir = (data_dir / 'processed' / '8bit-tiffs').resolve()
+process_dir = (data_dir / 'processed' / 'BG_corrected').resolve()
 output_dir = (data_dir / 'processed' / 'stabilized_tiffs').resolve()
 image_dirs, image_paths = find_all_filepaths(Path(process_dir), '.tiff')
 
@@ -82,20 +83,21 @@ jump_info = pd.read_csv(image_jump_info_csv)
 
 # loop through images
 for image_path in image_paths:
-  img_info = image_info.loc[image_info['new_filename'].str.fullmatch(re.search('(.*?)\.ome', image_path.stem).group(1))]
-  if img_info['jump_correction'].values[0] in ('d'):
-    original_image = imread(str(image_path)) #TCYX
+  img_info = image_info.loc[image_info['new_filename'].str.fullmatch(re.search('(.*?)\_BG', image_path.stem).group(1))]
+  # if img_info['jump_correction'].values[0] not in ('d'):
+  print(img_info['new_filename'].values[0])
+  original_image = imread(str(image_path)) #TCYX
 
-    # match video to dataframe info
-    # finds string match between beginning of string and '_crop'. The group tells it to  only get the first match, not the whole string
-    # img_jump_info = image_info.loc[image_info['new_filename'].str.startswith(re.search('(.*?)\.ome', image_path.stem).group(1))]
-    img_jump_info = jump_info.loc[jump_info['file name'] == img_info['jump_correction'].values[0]]
-    new_img = bound_new_image(img_jump_info, original_image)
+  # match video to dataframe info
+  # finds string match between beginning of string and '_crop'. The group tells it to  only get the first match, not the whole string
+  # img_jump_info = image_info.loc[image_info['new_filename'].str.startswith(re.search('(.*?)\.ome', image_path.stem).group(1))]
+  img_jump_info = jump_info.loc[jump_info['file name'] == img_info['jump_correction'].values[0]]
+  new_img = bound_new_image(img_jump_info, original_image)
 
-    # plt.imshow(new_img[50,:,:])
-    # plt.show()
-    savename = (Path(output_dir) / (img_info['new_filename'].values[0] + '_corrected.tiff')).resolve()
-    imwrite(savename, new_img.astype('uint8'), imagej=True, metadata={'axes': 'TCYX'},)
+  # plt.imshow(new_img[50,:,:])
+  # plt.show()
+  savename = (Path(output_dir) / (img_info['new_filename'].values[0] + '_corrected.tiff')).resolve()
+  imwrite(savename, new_img.astype('uint8'), imagej=True, metadata={'axes': 'TCYX'},)
 
 
   # # create the stack
