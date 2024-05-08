@@ -8,10 +8,11 @@ import pandas as pd
 import matplotlib
 matplotlib.use("qt5agg")
 import matplotlib.pyplot as plt
-import pickle
+# import pickle
 
 from tifffile import imread
 # from pytrackmate import trackmate_peak_import # if this isn't working check the version vs github version...
+
 import sys
 sys.path.append("./DirFileHelpers")
 from find_all_files import find_all_filepaths
@@ -19,6 +20,7 @@ from trackmatexml import TrackmateXML # I didn't make this!
 # https://github.com/rharkes/pyTrackMateXML
 # requires lxml and (from pip) version-parser
 
+from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog
 from collections import defaultdict
@@ -89,7 +91,7 @@ def find_distant_neighbors(label_mask, distance, target=None):
   return matches
 
 
-def find_euclidian_neighbors(tmxml, thresh_distance=50):
+def find_euclidian_neighbors(tmxml, touching_cells, thresh_distance=50):
   # 0.65 um xy pixel
   distance_pixel = thresh_distance / 0.65
 
@@ -109,6 +111,10 @@ def find_euclidian_neighbors(tmxml, thresh_distance=50):
     matches_list = np.argwhere((distance_matrix <= distance_pixel) & (distance_matrix > 0))
     # match the row/column to the spot id
     matches_list = np.take(centroid_list[:,0], matches_list) # another banger function! love this!!
+    # find neighbors that are already in touching list and drop them
+    touching_list = np.asarray([(k, i) for k, v in touching_cells[frame].items() for i in v])
+    idx, = np.where((matches_list == touching_list[:,None]).all(axis=-1).any(0)) # https://stackoverflow.com/a/75677754
+    matches_list = np.delete(matches_list, idx, axis=0)
     # group them up
     matches_list = pd.DataFrame(matches_list).groupby([0]).agg(lambda x: list(x))
     matches[frame] = matches_list.to_dict()[1]
@@ -224,7 +230,7 @@ def get_frame_stats(tmxml, macrophages, apoptotic_cells, touching_cells, n_frame
 
 def temp_cell_tracks_builder(cell_dict, LUT, type, other_dict=None):
   if type == 'apoptotic':
-    tall_dict = [(i, k) for i, j in enumerate(cell_dict) for k in j]
+    tall_dict = [(i, k) for i,j in enumerate(list(cell_dict.values())) for k in j]
     col_names = ["cell_id", 'apoptotic_frames', 'apoptotic_spots']
   elif type == 'macrophages':
     tall_dict = [(i, k) for i,j in enumerate(list(cell_dict.values())) for k in j]
@@ -287,84 +293,74 @@ def get_cell_stats(tmxml, cell_tracks, cell_spot_LUT, macrophages, apoptotic_cel
 
 # End analysis helpers
 
+
 ### MAIN ###
-# import label mask
-image_path = filedialog.askopenfilename(title='Select segmented labelmask')
-label_mask = imread(image_path)
+## First find all needed directories and load them all up
+data_dir = (Path.cwd() / 'data').resolve()
+results_dir = (data_dir / 'results' / 'tracks_csv').resolve()
+xml_directory = (data_dir / 'processed' / 'stabilized_tiffs').resolve()
+lblimgs_directory = (data_dir / 'processed' / 'label_images').resolve()
 
-# import xml
-xml_track_path = filedialog.askopenfilename(title='Select trackmate xml')
-tmxml = TrackmateXML()
-tmxml.loadfile(xml_track_path)
+## Get sample info
+# I use a csv file with info on all the images to save/load sample info
+sample_info = pd.read_csv((data_dir / 'image_log.csv').resolve())
+# set default values where they may not be set
+sample_info['mac_filt'] = sample_info['mac_filt'].fillna('MEAN_INTENSITY_CH1')
+sample_info['mac_filt_val'] = sample_info['mac_filt_val'].fillna(50.0)
+sample_info['ap_filt1'] = sample_info['ap_filt1'].fillna('MEAN_INTENSITY_CH2')
+sample_info['ap_filt1_val'] = sample_info['ap_filt1_val'].fillna(25.0)
 
-# I think this is fixed now
-# fix the label image (hopefully this gets fixed soon!)
-# correction_dictionary, rev_corrections = get_label_correction(label_mask, tmxml)
+## find all the Trackmate xml and label mask files
+xml_dirs, xml_paths = find_all_filepaths(xml_directory, '.xml')
+lmi_dirs, lmi_paths = find_all_filepaths(lblimgs_directory, '.tiff')
 
-# find touching cells
-tic = time.time()
-touching_cells = find_neighbors(label_mask, 2)
-toc = time.time()
-print('touching cells took: ' + str(toc - tic))
+## actually loop through and process the trackmate results
+for sample_name in sample_info['new_filename'].unique():
+  this_sample_info = sample_info.loc[sample_info['new_filename'] == sample_name]
+  xml_path = [xp for xp in xml_paths if xp.parts[-1].startswith(sample_name+'_')]
+  lmi_path = [lp for lp in lmi_paths if lp.parts[-1].startswith('LblImg_'+sample_name+'_')]
 
-# find red cells
-# contrast in channel 1 seems to work pretty well. Should be greater than 0.05
-tic = time.time()
-macrophages = find_cells_greater_than_prop(tmxml, 'SNR_CH1', .1)
-#
-# # find green cells
-# # this one is much trickier due to the bright middle for channel 2..
-# # try contrast greater SNR over 0.4
-apoptotic_cells1 = find_cells_greater_than_prop(tmxml, 'SNR_CH2', .3)
-apoptotic_cells2 = find_cells_greater_than_prop(tmxml, 'MEAN_INTENSITY_CH2', 30)
+  if len(xml_path) != 0 and len(lmi_path) != 0:
+    print('Analyzing ' + sample_name)
+    label_mask = imread(lmi_path[0]) # import label mask
 
-apoptotic_cells = []
-for frame in range(len(apoptotic_cells1)):
-  apoptotic_cells.append(set(apoptotic_cells1[frame]).intersection(apoptotic_cells2[frame]))
-toc = time.time()
-print('identifying cells took: ' + str(toc - tic))
+    tmxml = TrackmateXML()
+    tmxml.loadfile(xml_path[0]) # import TrackMate XML
 
-# tracks have two columns, the first is the 'source' and the second is 'target',
-# which I assume means spot index at t[x] and spot index at t[x+1]
+    ## find touching cells
+    print('Finding touching cells...')
+    touching_cells = find_neighbors(label_mask, 2)
 
-# This method is the most accurate but it is VERY slow since it has to separately look at each labelled cell and expand it
-# distant_neighbors = find_distant_neighbors(label_mask, 30)
+    ## find macrophages
+    print('Finding macrophages...')
+    macrophages = find_cells_greater_than_prop(tmxml, this_sample_info['mac_filt'].values[0], this_sample_info['mac_filt_val'].values[0])
 
-# This method just uses the centroid position to calculate euclidian distance between all the centroids, then matches up
-# the ones below a set threshold. It should be exponentially faster than the more accurate method
-tic = time.time()
-distant_neighbors = find_euclidian_neighbors(tmxml, 50)
-toc = time.time()
-print('finding neighbors took: '+ str(toc - tic))
+    ## find apoptotic cells
+    print('Finding apoptotic cells...')
+    apoptotic_cells = find_cells_greater_than_prop(tmxml, this_sample_info['ap_filt1'].values[0], this_sample_info['ap_filt1_val'].values[0])
+    # apoptotic_cells2 = find_cells_greater_than_prop(tmxml, 'MEAN_INTENSITY_CH2', 30)
+    #
+    # apoptotic_cells = []
+    # for frame in range(len(apoptotic_cells1)):
+    #   apoptotic_cells.append(set(apoptotic_cells1[frame]).intersection(apoptotic_cells2[frame]))
 
-all_frame_stats = get_frame_stats(tmxml, macrophages, apoptotic_cells, touching_cells, len(label_mask), distant_neighbors)
+    ## Find neighboring cells
+    print('Finding neighboring cells...')
+    # This method is the most accurate but it is VERY slow since it has to separately look at each labelled cell and expand it
+    # distant_neighbors = find_distant_neighbors(label_mask, 30)
 
-cell_tracks = create_cell_tracks(tmxml, all_frame_stats)
-cell_spot_LUT = make_cell_spot_LUT(cell_tracks, tmxml)
-all_cell_stats = get_cell_stats(tmxml, cell_tracks, cell_spot_LUT, macrophages, apoptotic_cells, touching_cells,  len(label_mask), all_frame_stats, distant_neighbors)
+    # This method just uses the centroid position to calculate euclidian distance between all the centroids, then matches up
+    # the ones below a set threshold. It should be exponentially faster than the more accurate method
+    distant_neighbors = find_euclidian_neighbors(tmxml, touching_cells, 50)
 
-all_cell_stats.to_csv('test4.csv')
+    ## Build and save results
+    print('Building csv...')
+    all_frame_stats = get_frame_stats(tmxml, macrophages, apoptotic_cells, touching_cells, len(label_mask), distant_neighbors)
 
-# with open('test_48_24.pickle', 'wb') as handle:
-#   pickle.dump(all_frame_stats, handle, protocol=pickle.HIGHEST_PROTOCOL)
-#
-# with open('test.pickle', 'rb') as handle:
-#   y = pickle.load(handle)
+    cell_tracks = create_cell_tracks(tmxml, all_frame_stats)
+    cell_spot_LUT = make_cell_spot_LUT(cell_tracks, tmxml)
+    all_cell_stats = get_cell_stats(tmxml, cell_tracks, cell_spot_LUT, macrophages, apoptotic_cells, touching_cells,  len(label_mask), all_frame_stats, distant_neighbors)
 
-print('test')
-# for frame in range(len(all_frame_stats)):
-#   chondro_reaper_rate = (len(all_frame_stats[frame]['dead_touch']) - len(all_frame_stats[frame]['mac_dead_touch'])) / \
-#                             (len(all_frame_stats[frame]['cells_label']) - len(all_frame_stats[frame]['apoptotic']) - len(all_frame_stats[frame]['macrophages']))
-#   macro_reaper_rate = (len(all_frame_stats[frame]['mac_dead_touch'])) / (len(all_frame_stats[frame]['macrophages']))
-#   macro_reaper_rate2 = (len(all_frame_stats[frame]['mac_dead_neighbor'])) / (len(all_frame_stats[frame]['macrophages']))
-#   print('\n frame ', frame)
-#   print('chondro death touch: ', chondro_reaper_rate * 100)
-#   print('macro death touch: ', macro_reaper_rate * 100)
-#   print('macro death neighbor: ', macro_reaper_rate2 * 100)
-#   if chondro_reaper_rate == 0:
-#     print('macro effectiveness: inf')
-#   else:
-#     print('macro effectiveness: ', macro_reaper_rate / chondro_reaper_rate)
-#     print('macro reach eff: ', macro_reaper_rate2 / chondro_reaper_rate)
-
-print('hello')
+    print('Saving results...')
+    save_name = (results_dir / (sample_name + '.csv')).resolve()
+    all_cell_stats.to_csv(save_name)
