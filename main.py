@@ -21,8 +21,6 @@ from trackmatexml import TrackmateXML # I didn't make this!
 # requires lxml and (from pip) version-parser
 
 from pathlib import Path
-import tkinter as tk
-from tkinter import filedialog
 from collections import defaultdict
 import time
 
