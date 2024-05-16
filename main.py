@@ -6,6 +6,7 @@ from scipy.spatial import distance
 
 import pandas as pd
 import matplotlib
+import math
 matplotlib.use("qt5agg")
 import matplotlib.pyplot as plt
 # import pickle
@@ -22,10 +23,13 @@ from trackmatexml import TrackmateXML # I didn't make this!
 
 from pathlib import Path
 from collections import defaultdict
+
 import time
+from joblib import Parallel, delayed
+
 
 ### Neighbor Finding Helpers
-def find_neighbors(label_mask, connectivity = 2):
+def find_neighbors(label_mask, connectivity = 2, frames_to_add=0):
   # https://stackoverflow.com/questions/72452267/finding-identity-of-touching-labels-objects-masks-in-images-using-python
   all_pairs = defaultdict(dict)
   if len(label_mask.shape) == 2:
@@ -35,8 +39,10 @@ def find_neighbors(label_mask, connectivity = 2):
     # I should use the overlapping code from the GM130 work.
     all_pairs[0] = find_touching_cells(label_mask, connectivity = 2)
   else:
+    # all_pairs = Parallel(n_jobs=4)(delayed(find_touching_cells)(label_mask[slice, :, :], connectivity = connectivity) for slice in range(1, len(label_mask)))
+    # all_pairs = {k+frames_to_add: v for v in all_pairs for k in range(len(label_mask))}
     for slice in range(len(label_mask)):
-      all_pairs[slice] = find_touching_cells(label_mask[slice, :, :], connectivity = 2)
+      all_pairs[slice + frames_to_add] = find_touching_cells(label_mask[slice, :, :], connectivity = 2)
   return all_pairs
 
 
@@ -89,7 +95,7 @@ def find_distant_neighbors(label_mask, distance, target=None):
   return matches
 
 
-def find_euclidian_neighbors(tmxml, touching_cells, thresh_distance=50):
+def find_euclidian_neighbors(tmxml, touching_cells, thresh_distance=50, frames_to_add=0):
   # 0.65 um xy pixel
   distance_pixel = thresh_distance / 0.65
 
@@ -110,12 +116,12 @@ def find_euclidian_neighbors(tmxml, touching_cells, thresh_distance=50):
     # match the row/column to the spot id
     matches_list = np.take(centroid_list[:,0], matches_list) # another banger function! love this!!
     # find neighbors that are already in touching list and drop them
-    touching_list = np.asarray([(k, i) for k, v in touching_cells[frame].items() for i in v])
+    touching_list = np.asarray([(k, i) for k, v in touching_cells[frame + frames_to_add].items() for i in v])
     idx, = np.where((matches_list == touching_list[:,None]).all(axis=-1).any(0)) # https://stackoverflow.com/a/75677754
     matches_list = np.delete(matches_list, idx, axis=0)
     # group them up
     matches_list = pd.DataFrame(matches_list).groupby([0]).agg(lambda x: list(x))
-    matches[frame] = matches_list.to_dict()[1]
+    matches[frame + frames_to_add] = matches_list.to_dict()[1]
   return matches
 
 
@@ -134,7 +140,7 @@ def get_all_tracks(tmxml, id_range=[], duplicate_split=True, break_split=True):
   return all_tracks
 
 
-def create_cell_tracks(tmxml, all_frame_stats):
+def create_cell_tracks(tmxml, frames_to_add=0):
   tracks = get_all_tracks(tmxml)
   child_track_alt = get_all_tracks(tmxml, [], False, True)
   cell_id = 0
@@ -146,10 +152,12 @@ def create_cell_tracks(tmxml, all_frame_stats):
       cell_track['cell_id'] = cell_id + cell.cell # make a new unique track/cell id for all the cells in the video
       cell_track['spot_ids'] = list(cell.spotids) # get all the spots in the track
       cell_track['frames'] = list(tmxml.getproperty(cell_track['spot_ids'], 'FRAME')) # get the frame # of each spot
+      cell_track['frames'] = [x+frames_to_add for x in cell_track['frames']]
       if cell.parent != 0:
         cell_track['parent_id'] = cell_id + cell.parent
         cell_track['independent_spot_ids'] = list(child_track_alt[track][cell.cell - 1].spotids)
         cell_track['independent_frames'] = list(tmxml.getproperty(cell_track['independent_spot_ids'], 'FRAME')) # get the frame # of each spot
+        cell_track['independent_frames'] = [x + frames_to_add for x in cell_track['independent_frames']]
       else:
         cell_track['parent_id'] = None
         cell_track['independent_spot_ids'] = None
@@ -178,7 +186,7 @@ def make_cell_spot_LUT(cell_tracks, tmxml):
   return LUT
 
 
-def find_cells_greater_than_prop(tmxml, cell_propertyname, limit):
+def find_cells_greater_than_prop(tmxml, cell_propertyname, limit, frames_to_add=0):
   cells  = defaultdict(list)
   property_col = tmxml.spotheader.index(cell_propertyname)
   frame_c = tmxml.spotheader.index('FRAME')
@@ -186,19 +194,30 @@ def find_cells_greater_than_prop(tmxml, cell_propertyname, limit):
   cell_list = (i for i, x in enumerate(cell_property) if x >= limit)
   for i in cell_list:
     # gets the label id instead of the row number (i)
-    cells[tmxml.spots[i,frame_c]].append(tmxml.spots[i,0])
+    cells[tmxml.spots[i,frame_c]+frames_to_add].append(tmxml.spots[i,0])
   return cells
 
 
 # End xml helpers
 
 # Analysis Helpers
-def get_frame_stats(tmxml, macrophages, apoptotic_cells, touching_cells, n_frames, neighbors=None):
+def get_cellularity(tmxml, label_mask):
+  # count all non-zero (not background) divided by 2048 x 2048 x slices
+  # do non-zero because with the video correction we've introduced more background than there are in reality...
+  cell_area = np.count_nonzero(label_mask) / (2048 * 2048 * label_mask.shape[0])
+  # count number of spots (cells) / slices
+  cell_count = tmxml.spots.shape[0] / label_mask.shape[0]
+  return [cell_area, cell_count]
+
+
+def get_frame_stats(tmxml, macrophages, apoptotic_cells, touching_cells, n_frames, neighbors=None, frames_to_add=0):
   afs = defaultdict(dict)
   frame_c = tmxml.spotheader.index('FRAME')
   for frame in range(n_frames):
+    frame_i = frame
+    frame = frame + frames_to_add
     # get the index of all cells in this frame
-    frame_cells_i = np.where(tmxml.spots[:,frame_c] == frame)[0]
+    frame_cells_i = np.where(tmxml.spots[:,frame_c] == frame_i)[0]
     #  get the label of all cells in the frame
     afs[frame]['cells_label'] = tmxml.spots[frame_cells_i,0]
     # which of these are also known macrophages
@@ -228,29 +247,32 @@ def get_frame_stats(tmxml, macrophages, apoptotic_cells, touching_cells, n_frame
 
 def temp_cell_tracks_builder(cell_dict, LUT, type, other_dict=None):
   if type == 'apoptotic':
-    tall_dict = [(i, k) for i,j in enumerate(list(cell_dict.values())) for k in j]
+    tall_dict = [(k, i) for k,j in list(cell_dict.items()) for i in j]
     col_names = ["cell_id", 'apoptotic_frames', 'apoptotic_spots']
   elif type == 'macrophages':
-    tall_dict = [(i, k) for i,j in enumerate(list(cell_dict.values())) for k in j]
+    tall_dict = [(k, i) for k,j in list(cell_dict.items()) for i in j]
     col_names = ["cell_id", 'macrophage_frames', 'macrophage_spots']
   elif type == 'touching':
-    tall_dict = [(i, k, l) for i, j in enumerate(list(cell_dict.values())) for k, l in j.items()]
+    tall_dict = [(i, k, l) for i, j in list(cell_dict.items()) for k, l in j.items()]
     col_names = ["cell_id", 'touching_frames', 'touching_cells']
   elif type == 'neighboring':
-    tall_dict = [(i, k, l) for i, j in enumerate(list(cell_dict.values())) for k, l in j.items()]
+    tall_dict = [(i, k, l) for i, j in list(cell_dict.items()) for k, l in j.items()]
     col_names = ["cell_id", 'neighbor_frames', 'neighbor_cells']
-    touch_tall_dict = [(i, k, l) for i, j in enumerate(list(other_dict.values())) for k, l in j.items()]
+    # touch_tall_dict = [(i, k, l) for i, j in list(other_dict.items()) for k, l in j.items()]
 
   temp_df = pd.DataFrame(tall_dict)  # convert to df
   if type == 'touching' or type == 'neighboring':
     # column '2' contains lists of all touching cells. This fn will 'flatten' and replicate the other columns.
     temp_df = temp_df.explode(2)  # this is amazing! I am so happy this function exists
-    if type == 'neighboring':
-      # this will remove all the neighbors that are actually touching (duplicate from other list)
-      touch_temp_df = pd.DataFrame(touch_tall_dict)  # convert to df
-      touch_temp_df = touch_temp_df.explode(2)
-      exclude_list = temp_df.merge(touch_temp_df, on=[0,1,2], how='outer', indicator=True)
-      temp_df = touch_temp_df.loc[exclude_list._merge == 'left_only']
+    # if type == 'neighboring':
+    # I've moved all this functionality into the finding neighbors code. I like the way this was done with the 'merge'
+    # so I'm going to leave it in for future reference
+    #   # this will remove all the neighbors that are actually touching (duplicate from other list)
+    #   touch_temp_df = pd.DataFrame(touch_tall_dict)  # convert to df
+    #   touch_temp_df = touch_temp_df.explode(2)
+    #   exclude_list = temp_df.merge(touch_temp_df, on=[0,1,2], how='outer', indicator=True)
+    #   # 'left only' is only present in temp_df, not in touch_temp_df
+    #   temp_df = touch_temp_df.loc[exclude_list._merge == 'left_only']
     temp_df[1] = temp_df[1].map(LUT)
     temp_df[1] = pd.to_numeric(temp_df[1], downcast='integer')
     temp_df[2] = temp_df[2].map(LUT)
@@ -269,7 +291,7 @@ def temp_cell_tracks_builder(cell_dict, LUT, type, other_dict=None):
   return temp_df
 
 
-def get_cell_stats(tmxml, cell_tracks, cell_spot_LUT, macrophages, apoptotic_cells, touching_cells, n_frames, all_frame_stats, distant_neighbors=None):
+def get_cell_stats(cell_tracks, cell_spot_LUT, macrophages, apoptotic_cells, touching_cells, distant_neighbors=None):
   # apoptotic spots & frames
   temp_cell_tracks = temp_cell_tracks_builder(apoptotic_cells, cell_spot_LUT, 'apoptotic')
   cell_tracks = cell_tracks.merge(temp_cell_tracks, on='cell_id', how='outer') # outer merge into cell_track df
@@ -288,6 +310,140 @@ def get_cell_stats(tmxml, cell_tracks, cell_spot_LUT, macrophages, apoptotic_cel
     cell_tracks = cell_tracks.merge(temp_cell_tracks, on='cell_id', how='outer') # outer merge into cell_track df
 
   return cell_tracks
+
+
+def analyze_xml(tmxml, label_mask, sample_info, this_sample_info, frames_to_add=0, cell_tracks_to_add=0, csv_links=None, cell_stats_24=None):
+  link_results=False
+  sample_name = this_sample_info['new_filename'].values[0]
+
+  ## get cellularity
+  info_rindex = sample_info.loc[sample_info['new_filename'] == sample_name].index.values[0]
+  sample_info.iloc[info_rindex,-2:] = get_cellularity(tmxml, label_mask)
+
+  # get cell track lookup table, correct if 48 hr sample
+  cell_tracks = create_cell_tracks(tmxml, frames_to_add)
+  cell_spot_LUT = make_cell_spot_LUT(cell_tracks, tmxml)
+
+  # if it's the 48hr one, create the links b/w 24 and 48 hr videos for the tracks instead of spots
+  if csv_links is not None and cell_stats_24 is not None:
+    csv_links = link_video_tracks(cell_stats_24, cell_tracks, csv_links)
+    # all these csv_link numbers are row numbers, not the track_id
+    # luckily right now they are all in order so adding 1 will correct them
+    csv_links_track_id = np.array(csv_links) + 1
+
+
+  # here use the adjusted tracks to update the LUT, should make later steps much easier if it gets sorted out early!
+  if cell_tracks_to_add != 0 and csv_links_track_id is not None:
+    cell_spot_LUT_array = np.array((list(cell_spot_LUT.keys())[0:-1],list(cell_spot_LUT.values())[0:-1])).T
+    # cell_spot_LUT_array = np.concatenate((cell_spot_LUT_array, cell_spot_LUT_array[:,1]), axis=1)
+    # The above does not work - index slice notation returns a 1D array that can't be concatenated (DUMB!)
+    # here we create a copy of the track index
+    cell_spot_LUT_array = np.concatenate((cell_spot_LUT_array, cell_spot_LUT_array[:,-1:], cell_spot_LUT_array[:,-1:]), axis=1)
+    # and overwrite all the ones that are in the 24hr links
+    mask = np.isin(cell_spot_LUT_array[:, 2], csv_links_track_id[:,1])
+    masked_mapped_vals = np.array(pd.DataFrame(cell_spot_LUT_array[:,2])[0].map({ k: v for v, k in csv_links_track_id}))
+    cell_spot_LUT_array[:, 2] = np.where(mask, masked_mapped_vals, cell_spot_LUT_array[:, 2])
+    # then apply the increased track number
+    cell_spot_LUT_array[:, 1] = cell_spot_LUT_array[:, 1] + cell_tracks_to_add
+    # and merge
+    cell_spot_LUT_array[:, 1] = np.where(mask, cell_spot_LUT_array[:, 2], cell_spot_LUT_array[:, 1])
+    # use this array to make two LUTs, one for the old to new tracks, one for the spots to new tracks
+    cell_spot_LUT = {k: v for k, v in cell_spot_LUT_array[:,0:2]}
+    new_track_LUT = {k: v for v, k in cell_spot_LUT_array[:,[1,3]]}
+
+    # Now these adjusted LUT need to be applied to the cell tracks that have already been evaluated
+    cell_tracks['cell_id'] = cell_tracks['cell_id'].map(new_track_LUT)
+    cell_tracks['parent_id'] = cell_tracks['parent_id'].map(new_track_LUT)
+    link_results = True
+
+  ## find touching cells
+  print('Finding touching cells...')
+  tic = time.time()
+  touching_cells = find_neighbors(label_mask, 2, frames_to_add)
+  toc = time.time()
+  print(toc-tic)
+
+  ## find macrophages
+  print('Finding macrophages...')
+  macrophages = find_cells_greater_than_prop(tmxml, this_sample_info['mac_filt'].values[0],
+                                             this_sample_info['mac_filt_val'].values[0], frames_to_add)
+
+  ## find apoptotic cells
+  print('Finding apoptotic cells...')
+  apoptotic_cells = find_cells_greater_than_prop(tmxml, this_sample_info['ap_filt1'].values[0],
+                                                 this_sample_info['ap_filt1_val'].values[0], frames_to_add)
+  # apoptotic_cells2 = find_cells_greater_than_prop(tmxml, 'MEAN_INTENSITY_CH2', 30)
+  #
+  # apoptotic_cells = []
+  # for frame in range(len(apoptotic_cells1)):
+  #   apoptotic_cells.append(set(apoptotic_cells1[frame]).intersection(apoptotic_cells2[frame]))
+
+  ## Find neighboring cells
+  print('Finding neighboring cells...')
+  # This method is the most accurate but it is VERY slow since it has to separately look at each labelled cell and expand it
+  # distant_neighbors = find_distant_neighbors(label_mask, 30)
+
+  # This method just uses the centroid position to calculate euclidian distance between all the centroids, then matches up
+  # the ones below a set threshold. It should be exponentially faster than the more accurate method
+  distant_neighbors = find_euclidian_neighbors(tmxml, touching_cells, 50, frames_to_add)
+
+  ## Build and save results
+  print('Building csv...')
+  # all_frame_stats = get_frame_stats(tmxml, macrophages, apoptotic_cells, touching_cells, len(label_mask),
+  #                                   distant_neighbors, frames_to_add)
+
+
+  all_cell_stats = get_cell_stats(cell_tracks, cell_spot_LUT, macrophages, apoptotic_cells, touching_cells, distant_neighbors)
+
+  if link_results:
+    compiled_cell_stats = link_cell_stats(cell_stats_24, all_cell_stats, csv_links)
+  else:
+    compiled_cell_stats = None
+
+  return(all_cell_stats, sample_info, compiled_cell_stats)
+
+
+def link_video_tracks(cell_stats_24, cell_stats_48, csv_links):
+  # first figure out which tracks link from 24 to 48 hours
+  final_24_spots = pd.DataFrame([t[-1] for t in cell_stats_24['spot_ids']])
+  final_24_spots['track_index_24'] = final_24_spots.index
+  first_48_spots = pd.DataFrame([t[0] for t in cell_stats_48['spot_ids']])
+  first_48_spots['track_index_48'] = first_48_spots.index
+  first_48_spots = first_48_spots[first_48_spots[0].duplicated() == False] # we only want the non-duplicated ones (not children)
+  csv_links = pd.merge(csv_links, final_24_spots, 'inner', left_on='24hr_spots', right_on=[0])
+  csv_links = pd.merge(csv_links, first_48_spots, 'inner', left_on='48hr_spots', right_on=[0])
+  csv_links = csv_links[['track_index_24', 'track_index_48']]
+  return csv_links
+
+
+def link_cell_stats(cell_stats_24, cell_stats_48, csv_links):
+  # These first two lines convert all the 'nan' values to None, which makes the logic of concatenating rows easier later
+  # it doesn't get 'parent_id', but we aren't trying to combine that row!
+  cell_stats_combined = cell_stats_24.where(cell_stats_24.notnull(), None)
+  cell_stats_48 = cell_stats_48.where(cell_stats_48.notnull(), None)
+
+  col_names_to_copy = ['spot_ids', 'frames', 'independent_spot_ids', 'independent_frames', 'apoptotic_frames',
+                       'apoptotic_spots', 'macrophage_frames', 'macrophage_spots', 'touching_frames', 'touching_cells',
+                       'neighbor_frames', 'neighbor_cells']
+  for index, link_track in csv_links.iterrows():
+    combined_row = cell_stats_combined.iloc[link_track.iloc[0],:]
+    # new_row = cell_stats_48.iloc[link_track.iloc[1],:]
+    for col in col_names_to_copy:
+      og = combined_row.loc[col]
+      new = cell_stats_48.loc[link_track.iloc[1],col]
+      if og is None and new is None:
+        combined = None
+      elif og is None:
+        combined = new
+      elif new is None:
+        combined = og
+      else:
+        combined = og + new
+      combined_row.loc[col] = combined
+    cell_stats_combined.loc[link_track.iloc[0]] = combined_row
+  # append the 48hr stats to the 24, but remove the rows we copied in the awful loop above
+  cell_stats_combined = pd.concat([cell_stats_24, cell_stats_48.drop(csv_links['track_index_48'])], axis=0)
+  return cell_stats_combined
 
 # End analysis helpers
 
@@ -311,54 +467,73 @@ sample_info['ap_filt1_val'] = sample_info['ap_filt1_val'].fillna(25.0)
 ## find all the Trackmate xml and label mask files
 xml_dirs, xml_paths = find_all_filepaths(xml_directory, '.xml')
 lmi_dirs, lmi_paths = find_all_filepaths(lblimgs_directory, '.tiff')
+csv_dirs, csv_paths = find_all_filepaths(xml_directory, '.csv')
 
 ## actually loop through and process the trackmate results
 for sample_name in sample_info['new_filename'].unique():
+  pair_video = False # boolean to prevent 48 hr analysis if not loaded properly or if it doesn't exist
+  loaded = False # boolean to prevent 24 hr analysis if not loaded properly
+
   this_sample_info = sample_info.loc[sample_info['new_filename'] == sample_name]
-  xml_path = [xp for xp in xml_paths if xp.parts[-1].startswith(sample_name+'_')]
-  lmi_path = [lp for lp in lmi_paths if lp.parts[-1].startswith('LblImg_'+sample_name+'_')]
+  # we don't want to run it on the pairs twice, only look at the 24hr ones, also skip ones we want to skip
+  if this_sample_info['time'].values[0] == 24 and this_sample_info['skip'].values[0] != True:
+    # get the 48 hour counterpart
+    paired_sample_info = sample_info.loc[sample_info['new_filename_timeless'] == this_sample_info['new_filename_timeless'].values[0]]
+    if len(paired_sample_info) > 1: # only look at ones that actually have pairs
+      paired_sample_info = paired_sample_info[paired_sample_info['time'] == 48]
+      pair_video = True
+      paired_name = paired_sample_info['new_filename'].values[0]
 
-  if len(xml_path) != 0 and len(lmi_path) != 0:
-    print('Analyzing ' + sample_name)
-    label_mask = imread(lmi_path[0]) # import label mask
+    # load the xml files. We will do this first to make sure they load correctly. If not we won't run analysis...
+    tmxml_path = [tm for tm in xml_paths if tm.parts[-1].startswith(this_sample_info['new_filename'].values[0] + '_')]
+    tmxml_24 = TrackmateXML()
+    try:
+      tmxml_24.loadfile(tmxml_path[0])  # import TrackMate XML
+      loaded = True
+    except:
+      loaded = False
+      print('could not load xml for ' + this_sample_info['new_filename'].values[0])
+    if loaded and pair_video:
+      tmxml_path = [tm for tm in xml_paths if tm.parts[-1].startswith(paired_name + '_')]
+      tmxml_48 = TrackmateXML()
+      try:
+        tmxml_48.loadfile(tmxml_path[0])
+      except:
+        pair_video = False
+        print('could not load xml for ' + paired_name)
 
-    tmxml = TrackmateXML()
-    tmxml.loadfile(xml_path[0]) # import TrackMate XML
+    # run the analysis
+    if loaded:
+      lmi_path = [lp for lp in lmi_paths if lp.parts[-1].startswith('LblImg_' + sample_name + '_')]
+      if len(lmi_path) != 0:
+        print('Analyzing ' + sample_name)
+        label_mask = imread(lmi_path[0])  # import label mask
+        cell_stats_24, sample_info, _ = analyze_xml(tmxml_24, label_mask, sample_info, this_sample_info)
+        print('Saving 24hr results...')
+        save_name = (results_dir / (sample_name + '.csv')).resolve()
+        cell_stats_24.to_csv(save_name)
 
-    ## find touching cells
-    print('Finding touching cells...')
-    touching_cells = find_neighbors(label_mask, 2)
+      if pair_video:
+        lmi_path = [lp for lp in lmi_paths if lp.parts[-1].startswith('LblImg_' + paired_name + '_')]
+        if len(lmi_path) != 0:
+          print('Analyzing ' + paired_name)
+          csv_link_file = [csv for csv in csv_paths if csv.parts[-1].startswith(this_sample_info['new_filename_timeless'].values[0] + '_links')]
+          csv_links = pd.read_csv(csv_link_file[0])
 
-    ## find macrophages
-    print('Finding macrophages...')
-    macrophages = find_cells_greater_than_prop(tmxml, this_sample_info['mac_filt'].values[0], this_sample_info['mac_filt_val'].values[0])
+          cell_tracks_to_add = max(cell_stats_24['cell_id'].to_numpy()) + 1
+          frames_to_add = max([t[-1] for t in cell_stats_24['frames']]) + 1
 
-    ## find apoptotic cells
-    print('Finding apoptotic cells...')
-    apoptotic_cells = find_cells_greater_than_prop(tmxml, this_sample_info['ap_filt1'].values[0], this_sample_info['ap_filt1_val'].values[0])
-    # apoptotic_cells2 = find_cells_greater_than_prop(tmxml, 'MEAN_INTENSITY_CH2', 30)
-    #
-    # apoptotic_cells = []
-    # for frame in range(len(apoptotic_cells1)):
-    #   apoptotic_cells.append(set(apoptotic_cells1[frame]).intersection(apoptotic_cells2[frame]))
+          label_mask = imread(lmi_path[0])  # import label mask
+          cell_stats_48, sample_info, combined_results = analyze_xml(tmxml_48, label_mask, sample_info, paired_sample_info, frames_to_add, cell_tracks_to_add, csv_links, cell_stats_24)
+          print('Saving 48hr results...')
+          save_name = (results_dir / (paired_name + '.csv')).resolve()
+          cell_stats_48.to_csv(save_name)
 
-    ## Find neighboring cells
-    print('Finding neighboring cells...')
-    # This method is the most accurate but it is VERY slow since it has to separately look at each labelled cell and expand it
-    # distant_neighbors = find_distant_neighbors(label_mask, 30)
+          print('Saving combined results...')
 
-    # This method just uses the centroid position to calculate euclidian distance between all the centroids, then matches up
-    # the ones below a set threshold. It should be exponentially faster than the more accurate method
-    distant_neighbors = find_euclidian_neighbors(tmxml, touching_cells, 50)
+          save_name = (results_dir / (this_sample_info['new_filename_timeless'].values[0] + '_combined.csv')).resolve()
+          combined_results.to_csv(save_name)
 
-    ## Build and save results
-    print('Building csv...')
-    all_frame_stats = get_frame_stats(tmxml, macrophages, apoptotic_cells, touching_cells, len(label_mask), distant_neighbors)
 
-    cell_tracks = create_cell_tracks(tmxml, all_frame_stats)
-    cell_spot_LUT = make_cell_spot_LUT(cell_tracks, tmxml)
-    all_cell_stats = get_cell_stats(tmxml, cell_tracks, cell_spot_LUT, macrophages, apoptotic_cells, touching_cells,  len(label_mask), all_frame_stats, distant_neighbors)
 
-    print('Saving results...')
-    save_name = (results_dir / (sample_name + '.csv')).resolve()
-    all_cell_stats.to_csv(save_name)
+sample_info.to_csv((data_dir / 'image_log_out.csv').resolve())
