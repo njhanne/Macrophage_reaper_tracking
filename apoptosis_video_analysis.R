@@ -2,7 +2,10 @@ library(dplyr)
 library(tidyr)
 library(stringr)
 library(purrr)
+
 library(tibble)
+library(data.table)
+
 library(ggplot2)
 library(cowplot)
 
@@ -17,16 +20,39 @@ define_cell_type <- function(temp_df, cell) {
 # Directory
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 getwd() #check our working directory
+setwd("./data/")
 
+sample_info <- read.csv('image_log_out.csv')
 
 # Load data
-df_test <- read.csv('test.csv')
+setwd("./results/tracks_csv/")
+
+samples <- unique(sample_info$new_filename_timeless)
+results_csvs <- list.files(pattern = ".csv$")
+combined_csvs <- results_csvs %>% str_subset(pattern = "^.*_combined.csv")
+drop_csvs <- combined_csvs %>% str_extract(pattern = "^(.*)_combined.csv$", group=1)
+
+search_str <- str_c(drop_csvs, collapse='|')
+uncombined_samples <- str_subset(samples, search_str, negate = TRUE)
+
+samples_to_keep <- sample_info[sample_info$new_filename_timeless %in% uncombined_samples,]$new_filename
+samples_to_keep <- str_c(samples_to_keep, '.csv')
+samples_to_load <- samples_to_keep[samples_to_keep %in% results_csvs]
+samples_to_load <- c(samples_to_load, combined_csvs)
+
+# read them all into a list, these can be very slow
+df_all <- lapply(samples_to_load, read.csv)
+samples_loaded_names <- str_extract(samples_to_load, '^(.*).csv$', group=1)
+df_all <- rbindlist(df_all, idcol=TRUE)
+df_all$.id = samples_loaded_names[df_all$.id] # put file name into the df
+df_all <- df_all[,!2] # gets rid of first useless added column
+df_all <- as.data.frame(df_all) # convert datatable back to df
 
 ### Convert all lists to numeric lists
-# columns_to_numlist <- c("spot_ids", "frames", "apoptotic_frames", "apoptotic_spots", 
-#                         "macrophage_frames", "macrophage_spots", "touching_frames", 
-#                         "touching_cells", "neighbor_frames", "neighbor_cells")
-columns_to_numlist <- c(4,6:16)
+# columns_to_numlist <- c("spot_ids", "frames", "apoptotic_frames", "apoptotic_spots",
+                        # "macrophage_frames", "macrophage_spots", "touching_frames",
+                        # "touching_cells", "neighbor_frames", "neighbor_cells")
+columns_to_numlist <- c(4:5,7:length(df_all))
 
 for (i in columns_to_numlist) {
   # get rid of brackets on beginning and end:  str_replace_all(a, '\\[|\\]', '')
@@ -35,18 +61,18 @@ for (i in columns_to_numlist) {
   # all together:  list(unname(sapply(strsplit(str_replace(a, '\\[|\\]', ''), ', ')[[1]], as.numeric)))
   # need the I(list()) part to make an 'asis' list, only way to store a list in df 
   # df_test[,i] <- I(list(lapply(df_test[,i], function(x) unname(sapply(strsplit(str_replace(x, '\\[|\\]', ''), ', ')[[1]], as.numeric)))))
-  temp <- lapply(df_test[,i], function(x) unname(na.omit(sapply(strsplit(str_replace_all(x, '\\[|\\]', ''), ', ')[[1]], as.numeric))))
-  df_test[,i] <- enframe(temp)[,2]
+  temp <- lapply(df_all[,i], function(x) unname(na.omit(sapply(strsplit(str_replace_all(x, '\\[|\\]', ''), ', ')[[1]], as.numeric))))
+  df_all[,i] <- enframe(temp)[,2]
 }
 
 ### cleanup data
 # delete cells only present for one frame -- excluding children
-df_test$parent_frame_count <- unlist(lapply(deframe(df_test[,c('cell_id','frames')]), function(x) length(x)))
-df_test <- df_test %>% filter(parent_frame_count > 1)
+df_all$parent_frame_count <- unlist(lapply(deframe(df_all[,c('cell_id','frames')]), function(x) length(x)))
+df_all <- df_all %>% filter(parent_frame_count > 1)
 
 # add in the actual frame count to include children
-df_test$frame_count <- unlist(lapply(deframe(df_test[,c('cell_id','independent_frames')]), function(x) length(x)))
-df_test <- df_test %>% mutate(frame_count = case_when(frame_count == 0 ~ parent_frame_count,
+df_all$frame_count <- unlist(lapply(deframe(df_all[,c('cell_id','independent_frames')]), function(x) length(x)))
+df_all <- df_all %>% mutate(frame_count = case_when(frame_count == 0 ~ parent_frame_count,
                                                       TRUE ~ frame_count))
 
 
@@ -56,16 +82,15 @@ df_test <- df_test %>% mutate(frame_count = case_when(frame_count == 0 ~ parent_
 # They likely won't be 100% of the time because of how the fluorescent 
 # detection works with trackmate and python
 # event if they are no longer fluorescing
-df_test$mac_frame_ratio <- define_cell_type(df_test, 'macrophage_frames')
-df_test <- df_test %>% mutate(mac_bool = case_when(mac_frame_ratio > 0.5 ~ TRUE,
+df_all$mac_frame_ratio <- define_cell_type(df_all, 'macrophage_frames')
+df_all <- df_all %>% mutate(mac_bool = case_when(mac_frame_ratio > 0.5 ~ TRUE,
                                                      .default = FALSE))
 
 # define apoptotic
-# These can be more brief flashes. In the future I may make it where they need to
-# stay lit for a bit, but for now we'll just do a straight binary
-df_test$dying_frame_ratio <- define_cell_type(df_test, 'apoptotic_frames')
+# These can be more brief, but still want them to be more than a few frames
+df_all$dying_frame_ratio <- define_cell_type(df_all, 'apoptotic_frames')
 # dead_count <- pmin(unlist(lapply(deframe(df_test[,c(3,7)]), function(x) length(x))))
-df_test <- df_test %>% mutate(dying_bool = case_when(dying_frame_ratio > 0 ~ TRUE,
+df_all <- df_all %>% mutate(dying_bool = case_when(dying_frame_ratio > 0.3 ~ TRUE,
                                                    .default = FALSE))
 
 
@@ -85,9 +110,10 @@ df_test <- df_test %>% mutate(dying_bool = case_when(dying_frame_ratio > 0 ~ TRU
 # first make the mac_touch bool
 # temp <- df_test %>% filter(map_lgl(cell_id, ~ any(unlist(test['touching_cells']) %in% .x)))
 # temp<- df_test[is.element(df_test$cell_id,  unlist(test['touching_cells'])),]
-for (i in 1:nrow(df_test)) {
-  if (length(df_test[i,'touching_cells'][[1]]) != 0) {
-    df_test[i,'touching_mac'] <- enframe(list(unname(do.call("rbind",lapply(unlist(df_test[i,'touching_cells']), function(x) df_test[df_test$cell_id == x,]))['mac_bool'])))[,2]
+# this is now way too slow, I should change this to a LUT
+for (i in 1:nrow(df_all)) {
+  if (length(df_all[i,'touching_cells'][[1]]) != 0) {
+    df_all[i,'touching_mac'] <- enframe(list(unname(do.call("rbind",lapply(unlist(df_all[i,'touching_cells']), function(x) df_all[df_all$cell_id == x,]))['mac_bool'])))[,2]
   }
 }
 
