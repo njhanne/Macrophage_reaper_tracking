@@ -43,6 +43,9 @@ samples_to_load <- c(samples_to_load, combined_csvs)
 # read them all into a list, these can be very slow
 df_all <- lapply(samples_to_load, read.csv)
 samples_loaded_names <- str_extract(samples_to_load, '^(.*).csv$', group=1)
+
+df_all <- readRDS('combined_csvs_processed.Rda')
+
 df_all <- rbindlist(df_all, idcol=TRUE)
 df_all$.id = samples_loaded_names[df_all$.id] # put file name into the df
 df_all <- df_all[,!2] # gets rid of first useless added column
@@ -60,7 +63,7 @@ for (i in columns_to_numlist) {
   # convert to numeric, remove 'name' and make into a list:   list(unname(sapply(a, as.numeric)))
   # all together:  list(unname(sapply(strsplit(str_replace(a, '\\[|\\]', ''), ', ')[[1]], as.numeric)))
   # need the I(list()) part to make an 'asis' list, only way to store a list in df 
-  # df_test[,i] <- I(list(lapply(df_test[,i], function(x) unname(sapply(strsplit(str_replace(x, '\\[|\\]', ''), ', ')[[1]], as.numeric)))))
+  # df_all[,i] <- I(list(lapply(df_all[,i], function(x) unname(sapply(strsplit(str_replace(x, '\\[|\\]', ''), ', ')[[1]], as.numeric)))))
   temp <- lapply(df_all[,i], function(x) unname(na.omit(sapply(strsplit(str_replace_all(x, '\\[|\\]', ''), ', ')[[1]], as.numeric))))
   df_all[,i] <- enframe(temp)[,2]
 }
@@ -89,7 +92,7 @@ df_all <- df_all %>% mutate(mac_bool = case_when(mac_frame_ratio > 0.5 ~ TRUE,
 # define apoptotic
 # These can be more brief, but still want them to be more than a few frames
 df_all$dying_frame_ratio <- define_cell_type(df_all, 'apoptotic_frames')
-# dead_count <- pmin(unlist(lapply(deframe(df_test[,c(3,7)]), function(x) length(x))))
+# dead_count <- pmin(unlist(lapply(deframe(df_all[,c(3,7)]), function(x) length(x))))
 df_all <- df_all %>% mutate(dying_bool = case_when(dying_frame_ratio > 0.3 ~ TRUE,
                                                    .default = FALSE))
 
@@ -108,14 +111,24 @@ df_all <- df_all %>% mutate(dying_bool = case_when(dying_frame_ratio > 0.3 ~ TRU
 # even be considered cells. Also that means that children have technically been touching the entire parent line...
 
 # first make the mac_touch bool
-# temp <- df_test %>% filter(map_lgl(cell_id, ~ any(unlist(test['touching_cells']) %in% .x)))
-# temp<- df_test[is.element(df_test$cell_id,  unlist(test['touching_cells'])),]
+# temp <- df_all %>% filter(map_lgl(cell_id, ~ any(unlist(test['touching_cells']) %in% .x)))
+# temp<- df_all[is.element(df_all$cell_id,  unlist(test['touching_cells'])),]
 # this is now way too slow, I should change this to a LUT
-for (i in 1:nrow(df_all)) {
-  if (length(df_all[i,'touching_cells'][[1]]) != 0) {
-    df_all[i,'touching_mac'] <- enframe(list(unname(do.call("rbind",lapply(unlist(df_all[i,'touching_cells']), function(x) df_all[df_all$cell_id == x,]))['mac_bool'])))[,2]
+df_all[, 'touching_mac'] <- NA
+for (sample_id in 1:length(unique(df_all$.id))) {
+  print(sample_id)
+  temp_df <- df_all[df_all$.id == unique(df_all$.id)[sample_id],]
+  temp_LUT <- temp_df[c('cell_id', 'mac_bool')]
+  
+  for (i in 1:nrow(temp_df)) {
+    if (length(temp_df[i,'touching_cells'][[1]]) != 0) {
+      # temp_df[i,'touching_mac'] <- enframe(list(unname(do.call("rbind",lapply(unlist(temp_df[i,'touching_cells']), function(x) temp_df[temp_df$cell_id == x,]))['mac_bool'])))[,2]
+      temp_df[i,'touching_mac'] <- enframe(list(unname(do.call("rbind",lapply(unlist(temp_df[i,'touching_cells']), function(x) temp_LUT[x,][2])))))[2]
+    }
   }
+  df_all[df_all$.id == unique(df_all$.id)[sample_id],]$touching_mac <- temp_df$touching_mac
 }
+
 
 # for now this is how we will handle parents/children:
 # consider the parent as just when the children are co-existent
@@ -126,64 +139,91 @@ for (i in 1:nrow(df_all)) {
 
 # Since the loop goes in row order the first children should always run before
 # their own children
-for (i in 1:nrow(df_test)) {
-  if (!is.na(df_test[i,'parent_id'])) {
-    parent_row <- df_test[df_test$cell_id == df_test[i,'parent_id'],]
-    df_test[i,'touching_cells'] <- enframe(list(unlist(c(parent_row['touching_cells'][[1]], df_test[i,'touching_cells'][[1]]))))[,2]
-    df_test[i,'touching_frames'] <- enframe(list(unlist(c(parent_row['touching_frames'][[1]], df_test[i,'touching_frames'][[1]]))))[,2]
-    df_test[i,'neighbor_cells'] <- enframe(list(unlist(c(parent_row['neighbor_cells'][[1]], df_test[i,'neighbor_cells'][[1]]))))[,2]
-    df_test[i,'neighbor_frames'] <- enframe(list(unlist(c(parent_row['neighbor_frames'][[1]], df_test[i,'neighbor_frames'][[1]]))))[,2]
-    df_test[i,'touching_mac'] <- enframe(list(unlist(c(parent_row['touching_mac'][[1]], df_test[i,'touching_mac'][[1]]))))[,2]
+# this one is also quite slow
+for (sample_id in 1:length(unique(df_all$.id))) {
+  print(sample_id)
+  temp_df <- df_all[df_all$.id == unique(df_all$.id)[sample_id],]
+  
+  for (i in 1:nrow(temp_df)) {
+    if (!is.na(temp_df[i,'parent_id'])) {
+      parent_row <- temp_df[temp_df$cell_id == temp_df[i,'parent_id'],]
+      temp_df[i,'touching_cells'] <- enframe(list(unlist(c(parent_row['touching_cells'][[1]], temp_df[i,'touching_cells'][[1]]))))[,2]
+      temp_df[i,'touching_frames'] <- enframe(list(unlist(c(parent_row['touching_frames'][[1]], temp_df[i,'touching_frames'][[1]]))))[,2]
+      temp_df[i,'neighbor_cells'] <- enframe(list(unlist(c(parent_row['neighbor_cells'][[1]], temp_df[i,'neighbor_cells'][[1]]))))[,2]
+      temp_df[i,'neighbor_frames'] <- enframe(list(unlist(c(parent_row['neighbor_frames'][[1]], temp_df[i,'neighbor_frames'][[1]]))))[,2]
+      temp_df[i,'touching_mac'] <- enframe(list(unlist(c(parent_row['touching_mac'][[1]], temp_df[i,'touching_mac'][[1]]))))[,2]
+    }
   }
+  df_all[df_all$.id == unique(df_all$.id)[sample_id],] <- temp_df
 }
 
 # first mac touch
 # this is so damn ugly my god
-df_test['first_mac_touch'] <- unlist(lapply(df_test['touching_mac'][[1]], function(x) match('TRUE', x[[1]])))
-df_test['first_mac_touch'] <- apply(df_test, 1, function(x) {
+df_all['first_mac_touch'] <- unlist(lapply(df_all['touching_mac'][[1]], function(x) match('TRUE', x[[1]])))
+df_all['first_mac_touch'] <- apply(df_all, 1, function(x) {
   ifelse(is.na(x['first_mac_touch']), NA, x['touching_frames'][[1]][ x['first_mac_touch'][[1]][[1]][1] ] )})
 
 # first apoptosis
-df_test <- df_test %>% rowwise() %>% mutate(first_apoptosis = ifelse(!is.null(apoptotic_frames[1][[1]]), unlist(apoptotic_frames[1][[1]]),  NA))
+df_all <- df_all %>% rowwise() %>% mutate(first_apoptosis = ifelse(!is.null(apoptotic_frames[1][[1]]), unlist(apoptotic_frames[1][[1]]),  NA))
 
 # first touch
-df_test <- df_test %>% rowwise() %>% mutate(first_touch = ifelse(!is.null(touching_frames[1][[1]]), unlist(touching_frames[1][[1]]),  NA))
+df_all <- df_all %>% rowwise() %>% mutate(first_touch = ifelse(!is.null(touching_frames[1][[1]]), unlist(touching_frames[1][[1]]),  NA))
 
 
 # last mac touch before apoptosis
 
 # t between mac touch and apoptosis
-df_test <- df_test %>% mutate(reaper_time = case_when((!is.na(first_apoptosis) & !is.na(first_mac_touch)) ~ first_apoptosis - first_mac_touch,
+df_all <- df_all %>% mutate(reaper_time = case_when((!is.na(first_apoptosis) & !is.na(first_mac_touch)) ~ first_apoptosis - first_mac_touch,
                                                       TRUE ~ NA))
 # t between any touch and apoptosis
-df_test <- df_test %>% mutate(pre_death_touch_time = case_when((!is.na(first_apoptosis) & !is.na(first_touch)) ~ first_apoptosis - first_touch,
+df_all <- df_all %>% mutate(pre_death_touch_time = case_when((!is.na(first_apoptosis) & !is.na(first_touch)) ~ first_apoptosis - first_touch,
                                                       TRUE ~ NA))
+# save the df so we don't have to redo all these slow loops
+saveRDS(df_all, file='combined_csvs_processed.Rda') 
 
+df_childless <- data.frame()
+for (sample_id in 1:length(unique(df_all$.id))) {
+  print(sample_id)
+  temp_df <- df_all[df_all$.id == unique(df_all$.id)[sample_id],]
+  
+  parents <- unique(temp_df$parent_id)
+  temp_df <- temp_df[-parents[!is.na(parents)],]
+  df_childless <- rbind(df_childless, temp_df) 
+}
 
-parents <- unique(df_test$parent_id)
-df_childless <- df_test[-parents[!is.na(parents)],]
 ### does touching make them die?
-total_dying <- df_childless %>% filter(dying_bool == TRUE) %>% nrow()
-dying_ratio <- total_dying / nrow(df_childless) * 100
+compiled_results_df <- data.frame(sample = unique(df_childless$.id), total_cells = NA, total_dying = NA, dying_ratio = NA,
+                                  total_mac = NA, mac_ratio = NA, total_mac_touch = NA,
+                                  total_reaped = NA, reaper_ratio = NA, not_reaped_ratio = NA, 
+                                  touched_not_mac_before_dying = NA, total_not_mac_touch = NA,
+                                  touched_not_mac_dying_ratio = NA, reaped_ratio = NA)
 
-total_mac <- df_childless %>% filter(mac_bool == TRUE) %>% nrow()
-mac_ratio <- total_mac / nrow(df_childless) * 100
+for (sample_id in 1:length(unique(df_childless$.id))) {
+  temp_df <- df_childless[df_childless$.id == unique(df_childless$.id)[sample_id],]
+  
+  compiled_results_df[sample_id, 'total_cells'] <- nrow(temp_df)
+  
+  compiled_results_df[sample_id, 'total_dying'] <- temp_df %>% filter(dying_bool == TRUE) %>% nrow()
+  compiled_results_df[sample_id, 'dying_ratio'] <- compiled_results_df[sample_id, 'total_dying'] / compiled_results_df[sample_id, 'total_cells'] * 100
+  
+  compiled_results_df[sample_id, 'total_mac'] <- temp_df %>% filter(mac_bool == TRUE) %>% nrow()
+  compiled_results_df[sample_id, 'mac_ratio'] <- compiled_results_df[sample_id, 'total_mac'] / compiled_results_df[sample_id, 'total_cells'] * 100
+  
+  compiled_results_df[sample_id, 'total_mac_touch'] <- temp_df %>% filter(!is.na(first_mac_touch)) %>% nrow()
+  compiled_results_df[sample_id, 'total_reaped'] <- temp_df %>% filter(reaper_time >= 0) %>% nrow()
+  
+  compiled_results_df[sample_id, 'reaper_ratio'] <- compiled_results_df[sample_id, 'total_reaped'] / compiled_results_df[sample_id, 'total_dying'] * 100
+  
+  # likelihood of any cell dying w/o mac touch
+  compiled_results_df[sample_id, 'not_reaped_ratio'] <- temp_df %>% filter(is.na(first_mac_touch) & (dying_bool == TRUE)) %>% nrow() / compiled_results_df[sample_id, 'total_cells'] * 100
+  # likelihood of any cell dying touched by not mac
+  compiled_results_df[sample_id, 'touched_not_mac_before_dying'] <- temp_df %>% filter(pre_death_touch_time >= 0 & (reaper_time < 0 | is.na(reaper_time))) %>% nrow()
+  compiled_results_df[sample_id, 'total_not_mac_touch'] <- temp_df %>% filter(!is.na(first_touch) & (reaper_time < 0 | is.na(reaper_time))) %>% nrow()
+  compiled_results_df[sample_id, 'touched_not_mac_dying_ratio'] <- compiled_results_df[sample_id, 'touched_not_mac_before_dying'] / compiled_results_df[sample_id, 'total_not_mac_touch'] * 100
+  # likelinhood of cells touched by macrophages dying
+  compiled_results_df[sample_id, 'reaped_ratio'] <- compiled_results_df[sample_id, 'total_reaped'] / compiled_results_df[sample_id, 'total_mac_touch'] * 100
 
-total_mac_touch <- df_childless %>% filter(!is.na(first_mac_touch)) %>% nrow()
-total_reaped <- df_childless %>% filter(reaper_time >= 0) %>% nrow()
-
-reaper_ratio <- total_reaped / total_dying * 100
-
-# likelihood of any cell dying w/o mac touch
-not_reaped_ratio <- df_childless %>% filter(is.na(first_mac_touch) & (dying_bool == TRUE)) %>% nrow() / nrow(df_childless) * 100
-# likelihood of any cell dying touched by not mac
-touched_not_mac_before_dying <- df_childless %>% filter(pre_death_touch_time >= 0 & (reaper_time < 0 | is.na(reaper_time))) %>% nrow()
-total_not_mac_touch <- df_childless %>% filter(!is.na(first_touch) & (reaper_time < 0 | is.na(reaper_time))) %>% nrow()
-touched_not_mac_dying_ratio <- touched_not_mac_before_dying / total_not_mac_touch * 100
-# likelinhood of cells touched by macrophages dying
-reaped_ratio <- total_reaped / total_mac_touch * 100
-
-
+}
 
 reaper_histogram <- ggplot() + geom_histogram(data = df_childless %>% filter(reaper_time >= 0), aes(x=-reaper_time/(60/8)), alpha=0.5, fill='red') + 
                  geom_histogram(data = df_childless %>% filter(pre_death_touch_time >= 0 & (reaper_time < 0 | is.na(reaper_time))), aes(x=-pre_death_touch_time/(60/8)), alpha=0.5, fill='black')

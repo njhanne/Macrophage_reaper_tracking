@@ -39,10 +39,10 @@ def find_neighbors(label_mask, connectivity = 2, frames_to_add=0):
     # I should use the overlapping code from the GM130 work.
     all_pairs[0] = find_touching_cells(label_mask, connectivity = 2)
   else:
-    # all_pairs = Parallel(n_jobs=4)(delayed(find_touching_cells)(label_mask[slice, :, :], connectivity = connectivity) for slice in range(1, len(label_mask)))
-    # all_pairs = {k+frames_to_add: v for v in all_pairs for k in range(len(label_mask))}
-    for slice in range(len(label_mask)):
-      all_pairs[slice + frames_to_add] = find_touching_cells(label_mask[slice, :, :], connectivity = 2)
+    all_pairs = Parallel(n_jobs=6)(delayed(find_touching_cells)(label_mask[slice, :, :], connectivity = connectivity) for slice in range(1, len(label_mask)))
+    all_pairs = {k+frames_to_add: v for v in all_pairs for k in range(len(label_mask))}
+    # for slice in range(len(label_mask)):
+    #   all_pairs[slice + frames_to_add] = find_touching_cells(label_mask[slice, :, :], connectivity = connectivity)
   return all_pairs
 
 
@@ -533,7 +533,4 @@ for sample_name in sample_info['new_filename'].unique():
 
           save_name = (results_dir / (this_sample_info['new_filename_timeless'].values[0] + '_combined.csv')).resolve()
           combined_results.to_csv(save_name)
-
-
-
 sample_info.to_csv((data_dir / 'image_log_out.csv').resolve())
