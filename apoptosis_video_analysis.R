@@ -53,8 +53,8 @@ df_all <- as.data.frame(df_all) # convert datatable back to df
 
 ### Convert all lists to numeric lists
 # columns_to_numlist <- c("spot_ids", "frames", "apoptotic_frames", "apoptotic_spots",
-                        # "macrophage_frames", "macrophage_spots", "touching_frames",
-                        # "touching_cells", "neighbor_frames", "neighbor_cells")
+# "macrophage_frames", "macrophage_spots", "touching_frames",
+# "touching_cells", "neighbor_frames", "neighbor_cells")
 columns_to_numlist <- c(4:5,7:length(df_all))
 
 for (i in columns_to_numlist) {
@@ -76,7 +76,7 @@ df_all <- df_all %>% filter(parent_frame_count > 1)
 # add in the actual frame count to include children
 df_all$frame_count <- unlist(lapply(deframe(df_all[,c('cell_id','independent_frames')]), function(x) length(x)))
 df_all <- df_all %>% mutate(frame_count = case_when(frame_count == 0 ~ parent_frame_count,
-                                                      TRUE ~ frame_count))
+                                                    TRUE ~ frame_count))
 
 
 ### define cells
@@ -87,7 +87,7 @@ df_all <- df_all %>% mutate(frame_count = case_when(frame_count == 0 ~ parent_fr
 # event if they are no longer fluorescing
 df_all$mac_frame_ratio <- define_cell_type(df_all, 'macrophage_frames')
 df_all <- df_all %>% mutate(mac_bool = case_when(mac_frame_ratio > 0.5 ~ TRUE,
-                                                     .default = FALSE))
+                                                 .default = FALSE))
 
 # define apoptotic
 # These can be more brief, but still want them to be more than a few frames
@@ -140,6 +140,7 @@ for (sample_id in 1:length(unique(df_all$.id))) {
 # Since the loop goes in row order the first children should always run before
 # their own children
 # this one is also quite slow
+# it also totally messes up the dtypes that we setup so nicely above...
 for (sample_id in 1:length(unique(df_all$.id))) {
   print(sample_id)
   temp_df <- df_all[df_all$.id == unique(df_all$.id)[sample_id],]
@@ -151,7 +152,7 @@ for (sample_id in 1:length(unique(df_all$.id))) {
       temp_df[i,'touching_frames'] <- enframe(list(unlist(c(parent_row['touching_frames'][[1]], temp_df[i,'touching_frames'][[1]]))))[,2]
       temp_df[i,'neighbor_cells'] <- enframe(list(unlist(c(parent_row['neighbor_cells'][[1]], temp_df[i,'neighbor_cells'][[1]]))))[,2]
       temp_df[i,'neighbor_frames'] <- enframe(list(unlist(c(parent_row['neighbor_frames'][[1]], temp_df[i,'neighbor_frames'][[1]]))))[,2]
-      temp_df[i,'touching_mac'] <- enframe(list(unlist(c(parent_row['touching_mac'][[1]], temp_df[i,'touching_mac'][[1]]))))[,2]
+      temp_df[i,'touching_mac'] <- enframe(list(na.omit(unlist(c(parent_row['touching_mac'][[1]], temp_df[i,'touching_mac'][[1]])))))[,2]
     }
   }
   df_all[df_all$.id == unique(df_all$.id)[sample_id],] <- temp_df
@@ -159,7 +160,7 @@ for (sample_id in 1:length(unique(df_all$.id))) {
 
 # first mac touch
 # this is so damn ugly my god
-df_all['first_mac_touch'] <- unlist(lapply(df_all['touching_mac'][[1]], function(x) match('TRUE', x[[1]])))
+df_all['first_mac_touch'] <- unlist(lapply(df_all['touching_mac'][[1]], function(x) match('TRUE', x)))
 df_all['first_mac_touch'] <- apply(df_all, 1, function(x) {
   ifelse(is.na(x['first_mac_touch']), NA, x['touching_frames'][[1]][ x['first_mac_touch'][[1]][[1]][1] ] )})
 
@@ -174,12 +175,13 @@ df_all <- df_all %>% rowwise() %>% mutate(first_touch = ifelse(!is.null(touching
 
 # t between mac touch and apoptosis
 df_all <- df_all %>% mutate(reaper_time = case_when((!is.na(first_apoptosis) & !is.na(first_mac_touch)) ~ first_apoptosis - first_mac_touch,
-                                                      TRUE ~ NA))
+                                                    TRUE ~ NA))
 # t between any touch and apoptosis
 df_all <- df_all %>% mutate(pre_death_touch_time = case_when((!is.na(first_apoptosis) & !is.na(first_touch)) ~ first_apoptosis - first_touch,
-                                                      TRUE ~ NA))
+                                                             TRUE ~ NA))
 # save the df so we don't have to redo all these slow loops
 saveRDS(df_all, file='combined_csvs_processed.Rda') 
+
 
 df_childless <- data.frame()
 for (sample_id in 1:length(unique(df_all$.id))) {
@@ -222,12 +224,10 @@ for (sample_id in 1:length(unique(df_childless$.id))) {
   compiled_results_df[sample_id, 'touched_not_mac_dying_ratio'] <- compiled_results_df[sample_id, 'touched_not_mac_before_dying'] / compiled_results_df[sample_id, 'total_not_mac_touch'] * 100
   # likelinhood of cells touched by macrophages dying
   compiled_results_df[sample_id, 'reaped_ratio'] <- compiled_results_df[sample_id, 'total_reaped'] / compiled_results_df[sample_id, 'total_mac_touch'] * 100
-
+  
 }
 
 reaper_histogram <- ggplot() + geom_histogram(data = df_childless %>% filter(reaper_time >= 0), aes(x=-reaper_time/(60/8)), alpha=0.5, fill='red') + 
-                 geom_histogram(data = df_childless %>% filter(pre_death_touch_time >= 0 & (reaper_time < 0 | is.na(reaper_time))), aes(x=-pre_death_touch_time/(60/8)), alpha=0.5, fill='black')
+  geom_histogram(data = df_childless %>% filter(pre_death_touch_time >= 0 & (reaper_time < 0 | is.na(reaper_time))), aes(x=-pre_death_touch_time/(60/8)), alpha=0.5, fill='black')
 
 # idea https://r-graph-gallery.com/322-custom-colours-in-sankey-diagram.html
-
-
