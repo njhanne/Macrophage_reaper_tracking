@@ -9,7 +9,7 @@ import matplotlib
 import math
 matplotlib.use("qt5agg")
 import matplotlib.pyplot as plt
-# import pickle
+import pickle
 
 from tifffile import imread
 # from pytrackmate import trackmate_peak_import # if this isn't working check the version vs github version...
@@ -29,7 +29,7 @@ from joblib import Parallel, delayed
 
 
 ### Neighbor Finding Helpers
-def find_neighbors(label_mask, connectivity = 2, frames_to_add=0):
+def find_neighbors(label_mask, connectivity = 2, frames_to_add=0, debug = False):
   # https://stackoverflow.com/questions/72452267/finding-identity-of-touching-labels-objects-masks-in-images-using-python
   all_pairs = defaultdict(dict)
   if len(label_mask.shape) == 2:
@@ -39,10 +39,12 @@ def find_neighbors(label_mask, connectivity = 2, frames_to_add=0):
     # I should use the overlapping code from the GM130 work.
     all_pairs[0] = find_touching_cells(label_mask, connectivity = 2)
   else:
-    all_pairs = Parallel(n_jobs=6)(delayed(find_touching_cells)(label_mask[slice, :, :], connectivity = connectivity) for slice in range(1, len(label_mask)))
-    all_pairs = {k+frames_to_add: v for v in all_pairs for k in range(len(label_mask))}
-    # for slice in range(len(label_mask)):
-    #   all_pairs[slice + frames_to_add] = find_touching_cells(label_mask[slice, :, :], connectivity = connectivity)
+    if debug:
+      for slice in range(len(label_mask)):
+        all_pairs[slice + frames_to_add] = find_touching_cells(label_mask[slice, :, :], connectivity = connectivity)
+    else:
+      all_pairs_temp = Parallel(n_jobs=6)(delayed(find_touching_cells)(label_mask[slice, :, :], connectivity = connectivity) for slice in range(0, len(label_mask)))
+      all_pairs = {k+frames_to_add: all_pairs_temp[k] for k in range(len(all_pairs_temp))}
   return all_pairs
 
 
@@ -313,6 +315,9 @@ def get_cell_stats(cell_tracks, cell_spot_LUT, macrophages, apoptotic_cells, tou
 
 
 def analyze_xml(tmxml, label_mask, sample_info, this_sample_info, frames_to_add=0, cell_tracks_to_add=0, csv_links=None, cell_stats_24=None):
+  # this is so that using debug mode doesn't crash pycharm. It doesn't work with the parallelized processing, unforunately
+  debug = False
+
   link_results=False
   sample_name = this_sample_info['new_filename'].values[0]
 
@@ -359,7 +364,7 @@ def analyze_xml(tmxml, label_mask, sample_info, this_sample_info, frames_to_add=
   ## find touching cells
   print('Finding touching cells...')
   tic = time.time()
-  touching_cells = find_neighbors(label_mask, 2, frames_to_add)
+  touching_cells = find_neighbors(label_mask, 2, frames_to_add, debug)
   toc = time.time()
   print(toc-tic)
 
