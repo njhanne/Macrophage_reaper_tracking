@@ -158,11 +158,25 @@ for (sample_id in 1:length(unique(df_all$.id))) {
   df_all[df_all$.id == unique(df_all$.id)[sample_id],] <- temp_df
 }
 
+df_all['touching_mac']<-enframe(lapply(df_all['touching_mac'][[1]], function(x) list(unlist(x))[[1]]))[,2]
+
 # first mac touch
 # this is so damn ugly my god
 df_all['first_mac_touch'] <- unlist(lapply(df_all['touching_mac'][[1]], function(x) match('TRUE', x)))
 df_all['first_mac_touch'] <- apply(df_all, 1, function(x) {
   ifelse(is.na(x['first_mac_touch']), NA, x['touching_frames'][[1]][ x['first_mac_touch'][[1]][[1]][1] ] )})
+
+# how many touches
+df_all['cell_touches'] <- unlist(lapply(df_all['touching_mac'][[1]], function(x) length(na.omit(x))))
+
+# how many mac touches # sum only counts 'TRUE'
+df_all['mac_touches'] <- unlist(lapply(df_all['touching_mac'][[1]], function(x) sum(na.omit(x))))
+
+# how many not-mac touches
+df_all['not_mac_touches'] <- df_all['cell_touches'] - df_all['mac_touches']
+
+# how many spots per track
+df_all['track_length'] <- unlist(lapply(df_all['frames'][[1]], function(x) length(x)))
 
 # first apoptosis
 df_all <- df_all %>% rowwise() %>% mutate(first_apoptosis = ifelse(!is.null(apoptotic_frames[1][[1]]), unlist(apoptotic_frames[1][[1]]),  NA))
@@ -170,15 +184,18 @@ df_all <- df_all %>% rowwise() %>% mutate(first_apoptosis = ifelse(!is.null(apop
 # first touch
 df_all <- df_all %>% rowwise() %>% mutate(first_touch = ifelse(!is.null(touching_frames[1][[1]]), unlist(touching_frames[1][[1]]),  NA))
 
-
 # last mac touch before apoptosis
 
 # t between mac touch and apoptosis
-df_all <- df_all %>% mutate(reaper_time = case_when((!is.na(first_apoptosis) & !is.na(first_mac_touch)) ~ first_apoptosis - first_mac_touch,
+df_all <- df_all %>% mutate(reaper_time = case_when((dying_bool & !is.na(first_mac_touch)) ~ first_apoptosis - first_mac_touch,
                                                     TRUE ~ NA))
 # t between any touch and apoptosis
-df_all <- df_all %>% mutate(pre_death_touch_time = case_when((!is.na(first_apoptosis) & !is.na(first_touch)) ~ first_apoptosis - first_touch,
+df_all <- df_all %>% mutate(pre_death_touch_time = case_when((dying_bool & !is.na(first_touch)) ~ first_apoptosis - first_touch,
                                                              TRUE ~ NA))
+
+df_all <- df_all %>% mutate(pre_death_touch_time = case_when((dying_bool & !is.na(first_touch)) ~ first_apoptosis - first_touch,
+                                                             TRUE ~ NA))
+
 # save the df so we don't have to redo all these slow loops
 saveRDS(df_all, file='combined_csvs_processed.Rda') 
 
@@ -198,7 +215,15 @@ compiled_results_df <- data.frame(sample = unique(df_childless$.id), total_cells
                                   total_mac = NA, mac_ratio = NA, total_mac_touch = NA,
                                   total_reaped = NA, reaper_ratio = NA, not_reaped_ratio = NA, 
                                   touched_not_mac_before_dying = NA, total_not_mac_touch = NA,
-                                  touched_not_mac_dying_ratio = NA, reaped_ratio = NA)
+                                  touched_not_mac_dying_ratio = NA, reaped_ratio = NA, 
+                                  total_touches = NA, mac_touches = NA, not_mac_touches = NA)
+
+compiled_tall_results_mac <- data.frame(sample = unique(df_childless$.id), cell_type = 'osteoclasts')
+compiled_tall_results_notmac <- data.frame(sample = unique(df_childless$.id), cell_type = 'chondrocytes')
+compiled_tall_results_dying <- data.frame(sample = unique(df_childless$.id), cell_type = 'dying')
+compiled_tall_results_notdying <- data.frame(sample = unique(df_childless$.id), cell_type = 'not_dying')
+compiled_tall_results_reaped <- data.frame(sample = unique(df_childless$.id), cell_type = 'reaped')
+compiled_tall_results_notreaped <- data.frame(sample = unique(df_childless$.id), cell_type = 'not_reaped')
 
 for (sample_id in 1:length(unique(df_childless$.id))) {
   temp_df <- df_childless[df_childless$.id == unique(df_childless$.id)[sample_id],]
@@ -220,12 +245,116 @@ for (sample_id in 1:length(unique(df_childless$.id))) {
   compiled_results_df[sample_id, 'not_reaped_ratio'] <- temp_df %>% filter(is.na(first_mac_touch) & (dying_bool == TRUE)) %>% nrow() / compiled_results_df[sample_id, 'total_cells'] * 100
   # likelihood of any cell dying touched by not mac
   compiled_results_df[sample_id, 'touched_not_mac_before_dying'] <- temp_df %>% filter(pre_death_touch_time >= 0 & (reaper_time < 0 | is.na(reaper_time))) %>% nrow()
-  compiled_results_df[sample_id, 'total_not_mac_touch'] <- temp_df %>% filter(!is.na(first_touch) & (reaper_time < 0 | is.na(reaper_time))) %>% nrow()
+  compiled_results_df[sample_id, 'not_mac_touch_ratio'] <- compiled_results_df[sample_id, 'total_not_mac_touch'] / (compiled_results_df[sample_id, 'total_cells'] - compiled_results_df[sample_id, 'total_mac'])
   compiled_results_df[sample_id, 'touched_not_mac_dying_ratio'] <- compiled_results_df[sample_id, 'touched_not_mac_before_dying'] / compiled_results_df[sample_id, 'total_not_mac_touch'] * 100
   # likelinhood of cells touched by macrophages dying
   compiled_results_df[sample_id, 'reaped_ratio'] <- compiled_results_df[sample_id, 'total_reaped'] / compiled_results_df[sample_id, 'total_mac_touch'] * 100
   
+  compiled_results_df[sample_id, 'total_touches'] <- mean(temp_df$cell_touches)
+  compiled_results_df[sample_id, 'mac_touches'] <- mean(temp_df$mac_touches)
+  compiled_results_df[sample_id, 'not_mac_touches'] <- mean(temp_df$not_mac_touches)
+  
+  temp_filter_df <- temp_df %>% filter(mac_bool == TRUE)
+  compiled_tall_results_mac[sample_id, 'total_touches'] <- mean(temp_filter_df$cell_touches)
+  compiled_tall_results_mac[sample_id, 'mac_touches'] <- mean(temp_filter_df$mac_touches)
+  compiled_tall_results_mac[sample_id, 'not_mac_touches'] <- mean(temp_filter_df$not_mac_touches)
+  
+  temp_filter_df <- temp_df %>% filter(mac_bool != TRUE)
+  compiled_tall_results_notmac[sample_id, 'total_touches'] <- mean(temp_filter_df$cell_touches)
+  compiled_tall_results_notmac[sample_id, 'mac_touches'] <- mean(temp_filter_df$mac_touches)
+  compiled_tall_results_notmac[sample_id, 'not_mac_touches'] <- mean(temp_filter_df$not_mac_touches)
+  
+  temp_filter_df <- temp_df %>% filter(dying_bool == TRUE)
+  compiled_tall_results_dying[sample_id, 'total_touches'] <- mean(temp_filter_df$cell_touches)
+  compiled_tall_results_dying[sample_id, 'mac_touches'] <- mean(temp_filter_df$mac_touches)
+  compiled_tall_results_dying[sample_id, 'not_mac_touches'] <- mean(temp_filter_df$not_mac_touches)
+  
+  temp_filter_df <- temp_df %>% filter(dying_bool != TRUE)
+  compiled_tall_results_notdying[sample_id, 'total_touches'] <- mean(temp_filter_df$cell_touches)
+  compiled_tall_results_notdying[sample_id, 'mac_touches'] <- mean(temp_filter_df$mac_touches)
+  compiled_tall_results_notdying[sample_id, 'not_mac_touches'] <- mean(temp_filter_df$not_mac_touches)
+  
+  temp_filter_df <- temp_df %>% filter(reaper_time >= 0)
+  compiled_tall_results_reaped[sample_id, 'total_touches'] <- mean(temp_filter_df$cell_touches)
+  compiled_tall_results_reaped[sample_id, 'mac_touches'] <- mean(temp_filter_df$mac_touches)
+  compiled_tall_results_reaped[sample_id, 'not_mac_touches'] <- mean(temp_filter_df$not_mac_touches)
+  
+  temp_filter_df <- temp_df %>% filter(is.na(first_mac_touch) & (dying_bool == TRUE))
+  compiled_tall_results_notreaped[sample_id, 'total_touches'] <- mean(temp_filter_df$cell_touches)
+  compiled_tall_results_notreaped[sample_id, 'mac_touches'] <- mean(temp_filter_df$mac_touches)
+  compiled_tall_results_notreaped[sample_id, 'not_mac_touches'] <- mean(temp_filter_df$not_mac_touches)
 }
+
+# cell type
+compiled_results_tall <- rbind(compiled_tall_results_mac, compiled_tall_results_notmac)
+compiled_results_tall <- inner_join(compiled_results_tall, compiled_results_df[1:2])
+
+compiled_results_taller <- compiled_results_tall %>% pivot_longer(.,-c(total_touches, cell_type, sample, total_cells), names_to = "touch_type", values_to = "touches")
+
+
+ggplot(data=compiled_results_taller, aes(x = total_cells, y = touches, shape = cell_type, color = touch_type)) +
+  geom_point() + geom_smooth(method=lm, se=FALSE, fullrange=TRUE) + ylab('touch events per cell')
+
+
+ggplot(data = compiled_results_taller, aes(x = cell_type, y = touches, fill = touch_type))+
+  geom_bar(stat = "summary", fun = "mean") + ylab('touch events per cell')
+
+
+# dying vs not dying
+dying_results_tall <- rbind(compiled_tall_results_dying, compiled_tall_results_notdying)
+dying_results_tall <- inner_join(dying_results_tall, compiled_results_df[1:2])
+
+dying_results_taller <- dying_results_tall %>% pivot_longer(.,-c(total_touches, cell_type, sample, total_cells), names_to = "touch_type", values_to = "touches")
+
+ggplot(data=dying_results_taller, aes(x = total_cells, y = touches, shape = cell_type, color = touch_type)) +
+  geom_point() + geom_smooth(method=lm, se=FALSE, fullrange=TRUE) + ylab('touch events per cell')
+
+ggplot(data = dying_results_taller, aes(x = cell_type, y = touches, fill = touch_type))+
+  geom_bar(stat = "summary", fun = "mean", position='fill') + ylab('relative touch events per cell')
+
+
+# reaped vs not reaped
+reaped_results_tall <- rbind(compiled_tall_results_reaped, compiled_tall_results_notreaped)
+reaped_results_tall <- inner_join(reaped_results_tall, compiled_results_df[1:2])
+
+reaped_results_taller <- reaped_results_tall %>% pivot_longer(.,-c(total_touches, cell_type, sample, total_cells), names_to = "touch_type", values_to = "touches")
+
+ggplot(data=reaped_results_taller, aes(x = total_cells, y = touches, shape = cell_type, color = touch_type)) +
+  geom_point() + geom_smooth(method=lm, se=FALSE, fullrange=TRUE) + ylab('touch events per cell')
+
+ggplot(data = reaped_results_taller, aes(x = cell_type, y = touches, fill = touch_type))+
+  geom_bar(stat = "summary", fun = "mean") + ylab('touch events per cell')
+
+
+reaped_results_tall2 <- rbind(compiled_tall_results_reaped, compiled_tall_results_notdying)
+reaped_results_tall2 <- inner_join(reaped_results_tall2, compiled_results_df[1:2])
+reaped_results_taller2 <- reaped_results_tall2 %>% pivot_longer(.,-c(total_touches, cell_type, sample, total_cells), names_to = "touch_type", values_to = "touches")
+
+ggplot(data = reaped_results_taller2, aes(x = cell_type, y = touches, fill = touch_type))+
+  geom_bar(stat = "summary", fun = "mean") + ylab('touch events per cell')
+ggplot(data = reaped_results_taller2, aes(x = cell_type, y = touches, fill = touch_type))+
+  geom_bar(stat = "summary", fun = "mean", position='fill') + ylab('touch events per cell')
+
+
+reaper_results_tall <- compiled_results_df[c(1,13,14)] %>% pivot_longer(cols = 2:3, names_to = 'cell_type', values_to = 'ratio')
+reaper_results_tall <- reaper_results_tall %>% mutate(cell_type = case_when(cell_type == 'reaped_ratio' ~ "macrophage",
+                                                                                cell_type == 'touched_not_mac_dying_ratio' ~ 'not_macrophage'))
+
+ggplot(data=reaper_results_tall) + geom_bar(aes(cell_type, ratio), stat = "summary", fun.y = "mean")
+t.test(ratio ~ cell_type, data=reaper_results_tall, paired = TRUE, alternative = "two.sided")
+
+
+touch_results_tall <- compiled_results_df[c(1,15,16)] %>% pivot_longer(cols = 2:3, names_to = 'cell_type', values_to = 'avg_touches')
+touch_results_tall <- touch_results_tall %>% mutate(cell_type = case_when(cell_type == 'mac_touch_ratio' ~ "macrophage",
+                                                                            cell_type == 'not_mac_touch_ratio' ~ 'not_macrophage'))
+
+ggplot(data=touch_results_tall) + geom_bar(aes(cell_type, avg_touches), stat = "summary", fun.y = "mean")
+t.test(avg_touches ~ cell_type, data=touch_results_tall, paired = TRUE, alternative = "two.sided")
+
+
+
+
+
 
 reaper_histogram <- ggplot() + geom_histogram(data = df_childless %>% filter(reaper_time >= 0), aes(x=-reaper_time/(60/8)), alpha=0.5, fill='red') + 
   geom_histogram(data = df_childless %>% filter(pre_death_touch_time >= 0 & (reaper_time < 0 | is.na(reaper_time))), aes(x=-pre_death_touch_time/(60/8)), alpha=0.5, fill='black')
