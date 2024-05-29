@@ -237,9 +237,15 @@ for (sample_id in 1:length(unique(df_childless$.id))) {
   compiled_results_df[sample_id, 'mac_ratio'] <- compiled_results_df[sample_id, 'total_mac'] / compiled_results_df[sample_id, 'total_cells'] * 100
   
   compiled_results_df[sample_id, 'total_mac_touch'] <- temp_df %>% filter(!is.na(first_mac_touch)) %>% nrow()
+  compiled_results_df[sample_id, 'total_not_mac_touch'] <- temp_df %>% filter(is.na(first_mac_touch)) %>% nrow()
   compiled_results_df[sample_id, 'total_reaped'] <- temp_df %>% filter(reaper_time >= 0) %>% nrow()
   
   compiled_results_df[sample_id, 'reaper_ratio'] <- compiled_results_df[sample_id, 'total_reaped'] / compiled_results_df[sample_id, 'total_dying'] * 100
+  
+  
+  compiled_results_df[sample_id, 'total_touches'] <- mean(temp_df$cell_touches)
+  compiled_results_df[sample_id, 'mac_touches'] <- mean(temp_df$mac_touches)
+  compiled_results_df[sample_id, 'not_mac_touches'] <- mean(temp_df$not_mac_touches)
   
   # likelihood of any cell dying w/o mac touch
   compiled_results_df[sample_id, 'not_reaped_ratio'] <- temp_df %>% filter(is.na(first_mac_touch) & (dying_bool == TRUE)) %>% nrow() / compiled_results_df[sample_id, 'total_cells'] * 100
@@ -250,9 +256,7 @@ for (sample_id in 1:length(unique(df_childless$.id))) {
   # likelinhood of cells touched by macrophages dying
   compiled_results_df[sample_id, 'reaped_ratio'] <- compiled_results_df[sample_id, 'total_reaped'] / compiled_results_df[sample_id, 'total_mac_touch'] * 100
   
-  compiled_results_df[sample_id, 'total_touches'] <- mean(temp_df$cell_touches)
-  compiled_results_df[sample_id, 'mac_touches'] <- mean(temp_df$mac_touches)
-  compiled_results_df[sample_id, 'not_mac_touches'] <- mean(temp_df$not_mac_touches)
+
   
   temp_filter_df <- temp_df %>% filter(mac_bool == TRUE)
   compiled_tall_results_mac[sample_id, 'total_touches'] <- mean(temp_filter_df$cell_touches)
@@ -336,12 +340,23 @@ ggplot(data = reaped_results_taller2, aes(x = cell_type, y = touches, fill = tou
   geom_bar(stat = "summary", fun = "mean", position='fill') + ylab('touch events per cell')
 
 
-reaper_results_tall <- compiled_results_df[c(1,13,14)] %>% pivot_longer(cols = 2:3, names_to = 'cell_type', values_to = 'ratio')
-reaper_results_tall <- reaper_results_tall %>% mutate(cell_type = case_when(cell_type == 'reaped_ratio' ~ "macrophage",
-                                                                                cell_type == 'touched_not_mac_dying_ratio' ~ 'not_macrophage'))
+# reaper ratios
+reaper_results_tall <- compiled_results_df[c(1,10,14)] %>% pivot_longer(cols = 2:3, names_to = 'cell_type', values_to = 'ratio')
+reaper_results_tall <- reaper_results_tall %>% mutate(cell_type = case_when(cell_type == 'reaped_ratio' ~ "reaper ratio",
+                                                                                cell_type == 'not_reaped_ratio' ~ 'not reaped ratio'))
 
 ggplot(data=reaper_results_tall) + geom_bar(aes(cell_type, ratio), stat = "summary", fun.y = "mean")
 t.test(ratio ~ cell_type, data=reaper_results_tall, paired = TRUE, alternative = "two.sided")
+
+
+
+reaper_results_tall <- compiled_results_df[c(1,13,14)] %>% pivot_longer(cols = 2:3, names_to = 'cell_type', values_to = 'ratio')
+reaper_results_tall <- reaper_results_tall %>% mutate(cell_type = case_when(cell_type == 'reaped_ratio' ~ "reaper ratio",
+                                                                            cell_type == 'touched_not_mac_dying_ratio' ~ 'not reaped ratio'))
+
+ggplot(data=reaper_results_tall) + geom_bar(aes(cell_type, ratio), stat = "summary", fun.y = "mean")
+t.test(ratio ~ cell_type, data=reaper_results_tall, paired = TRUE, alternative = "two.sided")
+
 
 
 touch_results_tall <- compiled_results_df[c(1,15,16)] %>% pivot_longer(cols = 2:3, names_to = 'cell_type', values_to = 'avg_touches')
