@@ -141,7 +141,7 @@ for (sample_id in 1:length(unique(df_all$.id))) {
 # their own children
 # this one is also quite slow
 # it also totally messes up the dtypes that we setup so nicely above...
-for (sample_id in 1:length(unique(df_all$.id))) {
+for (sample_id in 1:1) { #} length(unique(df_all$.id))) {
   print(sample_id)
   temp_df <- df_all[df_all$.id == unique(df_all$.id)[sample_id],]
   
@@ -159,6 +159,16 @@ for (sample_id in 1:length(unique(df_all$.id))) {
 }
 
 df_all['touching_mac']<-enframe(lapply(df_all['touching_mac'][[1]], function(x) list(unlist(x))[[1]]))[,2]
+
+df_all[, 'mac_touch_frames'] <- NA
+
+df_all['mac_touch_frames'] <- apply(df_all, 1, function(x) {
+  ifelse(is.na(x['touching_mac']), list(), Map(`[`, unlist(x['touching_frames']), unlist(x['touching_mac'])))})
+
+
+for (i in 1:nrow(temp_df)) {
+  df_all[i, 'mac_touch_frames'] <- enframe(unname(unlist(Map(`[`, unlist(df_all[i,'touching_frames']), unlist(df_all[i,'touching_mac'])))))
+}
 
 # first mac touch
 # this is so damn ugly my god
