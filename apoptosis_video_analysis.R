@@ -128,6 +128,10 @@ for (sample_id in 1:length(unique(df_all$.id))) {
   }
   df_all[df_all$.id == unique(df_all$.id)[sample_id],]$touching_mac <- temp_df$touching_mac
 }
+temp <- apply(df_all, 1, function(x) {ifelse(is.na(x['touching_mac']), list(), list(unlist(unname(x['touching_mac']))))})
+temp <- lapply(temp, unlist)
+temp <- lapply(temp, unname)
+df_all['touching_mac'] <- enframe(temp)[,2]
 
 
 # for now this is how we will handle parents/children:
@@ -141,7 +145,7 @@ for (sample_id in 1:length(unique(df_all$.id))) {
 # their own children
 # this one is also quite slow
 # it also totally messes up the dtypes that we setup so nicely above...
-for (sample_id in 1:1) { #} length(unique(df_all$.id))) {
+for (sample_id in 1:length(unique(df_all$.id))) {
   print(sample_id)
   temp_df <- df_all[df_all$.id == unique(df_all$.id)[sample_id],]
   
@@ -152,23 +156,26 @@ for (sample_id in 1:1) { #} length(unique(df_all$.id))) {
       temp_df[i,'touching_frames'] <- enframe(list(unlist(c(parent_row['touching_frames'][[1]], temp_df[i,'touching_frames'][[1]]))))[,2]
       temp_df[i,'neighbor_cells'] <- enframe(list(unlist(c(parent_row['neighbor_cells'][[1]], temp_df[i,'neighbor_cells'][[1]]))))[,2]
       temp_df[i,'neighbor_frames'] <- enframe(list(unlist(c(parent_row['neighbor_frames'][[1]], temp_df[i,'neighbor_frames'][[1]]))))[,2]
-      temp_df[i,'touching_mac'] <- enframe(list(na.omit(unlist(c(parent_row['touching_mac'][[1]], temp_df[i,'touching_mac'][[1]])))))[,2]
+      temp_df[i,'touching_mac'] <- enframe(list(unlist(c(parent_row['touching_mac'][[1]], temp_df[i,'touching_mac'][[1]]))))[,2]
     }
   }
   df_all[df_all$.id == unique(df_all$.id)[sample_id],] <- temp_df
 }
 
-df_all['touching_mac']<-enframe(lapply(df_all['touching_mac'][[1]], function(x) list(unlist(x))[[1]]))[,2]
+# df_all['touching_mac']<-enframe(lapply(df_all['touching_mac'][[1]], function(x) list(unlist(x))[[1]]))[,2]
 
-df_all[, 'mac_touch_frames'] <- NA
+temp <- apply(df_all, 1, function(x) {
+  ifelse(is.null(unlist(x['touching_mac'])), list(), list(unlist(unname(Map(`[`, unlist(x['touching_frames']), unlist(x['touching_mac']))))))})
+temp <- lapply(temp, unlist)
+temp <- lapply(temp, unname)
+df_all['mac_touch_frames'] <- enframe(temp)[,2]
 
-df_all['mac_touch_frames'] <- apply(df_all, 1, function(x) {
-  ifelse(is.na(x['touching_mac']), list(), Map(`[`, unlist(x['touching_frames']), unlist(x['touching_mac'])))})
+temp <- apply(df_all, 1, function(x) {
+  ifelse(is.null(unlist(x['touching_mac'])), list(), list(unlist(unname(Map(`[`, unlist(x['touching_frames']), !unlist(x['touching_mac']))))))})
+temp <- lapply(temp, unlist)
+temp <- lapply(temp, unname)
+df_all['notmac_touch_frames'] <- enframe(temp)[,2]
 
-
-for (i in 1:nrow(temp_df)) {
-  df_all[i, 'mac_touch_frames'] <- enframe(unname(unlist(Map(`[`, unlist(df_all[i,'touching_frames']), unlist(df_all[i,'touching_mac'])))))
-}
 
 # first mac touch
 # this is so damn ugly my god
