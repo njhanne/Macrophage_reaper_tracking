@@ -379,7 +379,8 @@ reaper_results_tall <- compiled_results_df[c(1,13,14)] %>% pivot_longer(cols = 2
 reaper_results_tall <- reaper_results_tall %>% mutate(cell_type = case_when(cell_type == 'reaped_ratio' ~ "reaper ratio",
                                                                             cell_type == 'touched_not_mac_dying_ratio' ~ 'not reaped ratio'))
 
-ggplot(data=reaper_results_tall) + geom_bar(aes(cell_type, ratio), stat = "summary", fun.y = "mean")
+ggplot(data=reaper_results_tall) + geom_bar(aes(cell_type, ratio), stat = "summary", fun.y = "mean") + 
+                                   geom_jitter(aes(cell_type, ratio, shape=cell_type), width=0.1)
 t.test(ratio ~ cell_type, data=reaper_results_tall, paired = TRUE, alternative = "two.sided")
 
 
@@ -392,41 +393,98 @@ ggplot(data=touch_results_tall) + geom_bar(aes(cell_type, avg_touches), stat = "
 t.test(avg_touches ~ cell_type, data=touch_results_tall, paired = TRUE, alternative = "two.sided")
 
 
-# histograms
-test2 <- df_childless[df_childless$id_col == unique(df_childless$id_col)[5],]
-test2 <- test2 %>% filter(!is.na(first_apoptosis)) %>% select(first_apoptosis, mac_touch_frames, notmac_touch_frames)
-
+# probability of reap
 df_childless$mac_t_diff <- apply(df_childless, 1, function(x) {x['mac_touch_frames'][[1]] - x['first_apoptosis'][[1]]})
 df_childless$notmac_t_diff <- apply(df_childless, 1, function(x) {x['notmac_touch_frames'][[1]] - x['first_apoptosis'][[1]]})
 df_childless$notmac_touch_count <- apply(df_childless, 1, function(x) {length(x['notmac_touch_frames'][[1]])})
 df_childless$mac_touch_count <- apply(df_childless, 1, function(x) {length(x['mac_touch_frames'][[1]])})
 
+# if touched by cell type, what is probability of it resulting in dying?
+# total touches by cell type that are reap / total touches by cell type
+df_childless$mac_reap_count <- apply(df_childless, 1, function(x) {length(x['mac_t_diff'][[1]][!is.na(x['mac_t_diff'][[1]]) & x['mac_t_diff'][[1]] <= 0])})
+df_childless$notmac_reap_count <- apply(df_childless, 1, function(x) {length(x['notmac_t_diff'][[1]][!is.na(x['notmac_t_diff'][[1]]) & x['notmac_t_diff'][[1]] <= 0])})
+
+cell_reaper_probs <- df_childless %>% group_by(id_col) %>% summarise(mac_reap_count = sum(mac_reap_count), mac_touch_count = sum(mac_touch_count),
+                                                                     notmac_reap_count = sum(notmac_reap_count), notmac_touch_count = sum(notmac_touch_count))
+cell_reaper_probs$mac_reaper_ratio <- cell_reaper_probs$mac_reap_count / cell_reaper_probs$mac_touch_count 
+cell_reaper_probs$notmac_reaper_ratio <- cell_reaper_probs$notmac_reap_count / cell_reaper_probs$notmac_touch_count
+cell_reaper_probs_tall <- cell_reaper_probs[c(1,6,7)] %>% pivot_longer(cols = 2:3, names_to = 'cell_type', values_to = 'reaper_prob')
+
+ggplot(data=cell_reaper_probs_tall) + geom_bar(aes(cell_type, reaper_prob), stat = "summary", fun.y = "mean") + 
+                                      geom_jitter(aes(cell_type, reaper_prob, shape=cell_type), width=0.1)
+# this result, together with the 'touched not mac before dying' above, show that
+# dying cells are equally likely to touch mac or not mac and mac and notmac touch
+# dying cells equally likely, BUT
+# cells that don't touch macrophages are much less likely to die
+
+
+# histograms
+df_childless$mac_t_diff <- apply(df_childless, 1, function(x) {x['mac_touch_frames'][[1]] - x['first_apoptosis'][[1]]})
+df_childless$notmac_t_diff <- apply(df_childless, 1, function(x) {x['notmac_touch_frames'][[1]] - x['first_apoptosis'][[1]]})
+df_childless$notmac_touch_count <- apply(df_childless, 1, function(x) {length(x['notmac_touch_frames'][[1]])})
+df_childless$mac_touch_count <- apply(df_childless, 1, function(x) {length(x['mac_touch_frames'][[1]])})
+
+# test2 <- df_childless[df_childless$id_col == unique(df_childless$id_col)[5],]
+# test2 <- test2 %>% filter(!is.na(first_apoptosis)) %>% select(first_apoptosis, mac_touch_frames, notmac_touch_frames)
+
+dying_childless <- df_childless %>% filter(!is.na(first_apoptosis)) %>% select(id_col, mac_touch_frames, notmac_touch_frames, mac_t_diff, notmac_t_diff, mac_touch_count, notmac_touch_count)
+dying_childless$med_neg_mac_t_diff <- apply(dying_childless, 1, function(x) { median(x['mac_t_diff'][[1]][x['mac_t_diff'][[1]] < 0]) })
+dying_childless$mean_neg_mac_t_diff <- apply(dying_childless, 1, function(x) { mean(x['mac_t_diff'][[1]][x['mac_t_diff'][[1]] < 0]) })
+dying_childless$med_neg_notmac_t_diff <- apply(dying_childless, 1, function(x) { median(x['notmac_t_diff'][[1]][x['notmac_t_diff'][[1]] < 0]) })
+dying_childless$mean_neg_notmac_t_diff <- apply(dying_childless, 1, function(x) { mean(x['notmac_t_diff'][[1]][x['notmac_t_diff'][[1]] < 0]) })
+
+avg_touch_t_tall <- dying_childless[c(1,10,11)] %>% pivot_longer(cols = 2:3, names_to = 'cell_type', values_to = 'avg_touch_t') # mean, not median
+
+ggplot(avg_touch_t_tall) + geom_boxplot(aes(avg_touch_t*8/60, id_col, color = cell_type))
+ggplot() + geom_boxplot(data=avg_touch_t_tall, aes(avg_touch_t*8/60, cell_type))
+
+
 tall_test <- data.frame()
 mac_list <- list()
 notmac_list <- list()
-for (r in 1:nrow(df_childless)) {
-  if (!is.null(df_childless[r,'mac_touch_frames'][[1]][[1]]) & length(df_childless[r,'mac_touch_frames'][[1]][[1]]) != 0) {
-    temp_mac <- as.data.frame(append(enframe(unlist(df_childless[r,'mac_t_diff'][[1]]))[,2],
-                                      c(df_childless[r,'mac_touch_count'], df_childless[r,'mac_touch_count']+df_childless[r, 'notmac_touch_count'])))
+for (r in 1:nrow(dying_childless)) {
+  if (!is.null(dying_childless[r,'mac_touch_frames'][[1]][[1]]) & length(dying_childless[r,'mac_touch_frames'][[1]][[1]]) != 0) {
+    temp_mac <- as.data.frame(append(enframe(unlist(dying_childless[r,'mac_t_diff'][[1]]))[,2],
+                                      c(dying_childless[r,'mac_touch_count'], dying_childless[r,'mac_touch_count']+dying_childless[r, 'notmac_touch_count'], dying_childless[r, 'id_col'])))
     mac_list <- append(mac_list, list(temp_mac))
   }
-  if (!is.null(df_childless[r,'notmac_touch_frames'][[1]][[1]]) & length(df_childless[r,'notmac_touch_frames'][[1]][[1]]) != 0) {
-    temp_notmac <- as.data.frame(append(enframe(unlist(df_childless[r,'notmac_t_diff'][[1]]))[,2],
-                                     c(df_childless[r,'notmac_touch_count'], df_childless[r,'mac_touch_count']+df_childless[r, 'notmac_touch_count'])))
+  if (!is.null(dying_childless[r,'notmac_touch_frames'][[1]][[1]]) & length(dying_childless[r,'notmac_touch_frames'][[1]][[1]]) != 0) {
+    temp_notmac <- as.data.frame(append(enframe(unlist(dying_childless[r,'notmac_t_diff'][[1]]))[,2],
+                                     c(dying_childless[r,'notmac_touch_count'], dying_childless[r,'mac_touch_count']+dying_childless[r, 'notmac_touch_count'], dying_childless[r, 'id_col'])))
     notmac_list <- append(notmac_list, list(temp_notmac))
   }
 }
 mac_touch_test <- rbindlist(mac_list)
 notmac_touch_test <- rbindlist(notmac_list)
 
+for (sample in 1:length(unique(dying_childless$id_col))) {
+  histo_plot <- ggplot() + geom_histogram(data=mac_touch_test[mac_touch_test$id_col == unique(dying_childless$id_col)[sample]], aes(x=value/(60/8), y=..density.., weight = 1/mac_touch_count), binwidth = 0.5, alpha=0.5, fill='red') + 
+             geom_density(data=mac_touch_test[mac_touch_test$id_col == unique(dying_childless$id_col)[sample]], aes(x=value/(60/8), y=..density.., weight = 1/mac_touch_count), color='red') +
+             geom_histogram(data=notmac_touch_test[notmac_touch_test$id_col == unique(dying_childless$id_col)[sample]], aes(x=value/(60/8), y=..density.., weight = 1/notmac_touch_count), binwidth = 0.5, alpha=0.5, fill='black') + 
+             geom_density(data=notmac_touch_test[notmac_touch_test$id_col == unique(dying_childless$id_col)[sample]], aes(x=value/(60/8), y=..density.., weight = 1/notmac_touch_count))
+  pdf(paste0("../figures/histogram_", as.character(unique(dying_childless$id_col)[sample]), "_mac_and_notmac.pdf"), width=8, height=5)
+  plot(histo_plot)
+  dev.off()
+}
 
-ggplot() + geom_histogram(data=mac_touch_test, aes(x=value/(60/8), y=..density.., weight = 1/mac_touch_count), binwidth = 0.5, alpha=0.5, fill='red') + 
-           geom_density(data=mac_touch_test, aes(x=value/(60/8), y=..density.., weight = 1/mac_touch_count), color='red') +
-           geom_histogram(data=notmac_touch_test, aes(x=value/(60/8), y=..density.., weight = 1/notmac_touch_count), binwidth = 0.5, alpha=0.5, fill='black') + 
-           geom_density(data=notmac_touch_test, aes(x=value/(60/8), y=..density.., weight = 1/notmac_touch_count))
+# setup the weighting for the combined histogram
+mac_grand_sum <- sum(mac_touch_test$mac_touch_count)
+mac_sample_sum <- mac_touch_test %>% group_by(id_col) %>% summarise(sample_sum = sum(mac_touch_count))
+mac_sample_sum$relative_weight <- mac_sample_sum$sample_sum / mac_grand_sum
+mac_touch_test <- left_join(mac_touch_test, mac_sample_sum)
+notmac_grand_sum <- sum(notmac_touch_test$notmac_touch_count)
+notmac_sample_sum <- notmac_touch_test %>% group_by(id_col) %>% summarise(sample_sum = sum(notmac_touch_count))
+notmac_sample_sum$relative_weight <- notmac_sample_sum$sample_sum / notmac_grand_sum
+notmac_touch_test <- left_join(notmac_touch_test, notmac_sample_sum)
 
+# plot combined histogram
+histo_plot <- ggplot() + geom_histogram(data=mac_touch_test, aes(x=value/(60/8), y=..density.., weight = relative_weight/mac_touch_count), binwidth = 0.5, alpha=0, fill='red') + 
+  geom_density(data=mac_touch_test, aes(x=value/(60/8), y=..density.., weight = relative_weight/mac_touch_count), color='red') +
+  geom_histogram(data=notmac_touch_test[notmac_touch_test$id_col == unique(dying_childless$id_col)[sample]], aes(x=value/(60/8), y=..density.., weight = relative_weight/notmac_touch_count), binwidth = 0.5, alpha=0, fill='black') + 
+  geom_density(data=notmac_touch_test[notmac_touch_test$id_col == unique(dying_childless$id_col)[sample]], aes(x=value/(60/8), y=..density.., weight = relative_weight/notmac_touch_count))
+pdf(paste0("../figures/histogram_E2_atdc5_oc_combined_mac_and_notmac.pdf"), width=8, height=5)
+plot(histo_plot)
+dev.off()
 
-reaper_histogram <- ggplot() + geom_histogram(data = df_childless %>% filter(reaper_time >= 0), aes(x=-reaper_time/(60/8)), alpha=0.5, fill='red') + 
-  geom_histogram(data = df_childless %>% filter(pre_death_touch_time >= 0 & (reaper_time < 0 | is.na(reaper_time))), aes(x=-pre_death_touch_time/(60/8)), alpha=0.5, fill='black')
 
 # idea https://r-graph-gallery.com/322-custom-colours-in-sankey-diagram.html
