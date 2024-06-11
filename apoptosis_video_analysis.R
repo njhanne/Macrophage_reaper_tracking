@@ -41,11 +41,10 @@ samples_to_load <- samples_to_keep[samples_to_keep %in% results_csvs]
 samples_to_load <- c(samples_to_load, combined_csvs)
 
 # read them all into a list, these can be very slow
-df_all <- lapply(samples_to_load, read.csv)
 samples_loaded_names <- str_extract(samples_to_load, '^(.*).csv$', group=1)
-
 df_all <- readRDS('combined_csvs_processed.Rda')
 
+df_all <- lapply(samples_to_load, read.csv)
 df_all <- rbindlist(df_all, idcol=TRUE)
 df_all$.id = samples_loaded_names[df_all$.id] # put file name into the df
 df_all <- df_all[,!2] # gets rid of first useless added column
@@ -217,6 +216,8 @@ df_all <- df_all %>% mutate(pre_death_touch_time = case_when((dying_bool & !is.n
 saveRDS(df_all, file='combined_csvs_processed.Rda') 
 
 
+### Actual analysis ###
+
 df_childless <- data.frame()
 for (sample_id in 1:length(unique(df_all$.id))) {
   print(sample_id)
@@ -227,23 +228,30 @@ for (sample_id in 1:length(unique(df_all$.id))) {
   df_childless <- rbind(df_childless, temp_df) 
 }
 
+# filter out the ones that have bad tracking / too many cells
+#TODO move this function up to the part where I load in the csvs to make things 
+# a lot faster & more programatic
+bad_samples <- c('E2_atdc5_oc_24hr_17', 'E2_atdc5_oc_48hr_17', 'E2_atdc5_oc_17_combined')
+df_childless <- rename(df_childless, id_col = .id)
+df_childless <- df_childless %>% filter(! id_col %in% bad_samples)
+
 ### does touching make them die?
-compiled_results_df <- data.frame(sample = unique(df_childless$.id), total_cells = NA, total_dying = NA, dying_ratio = NA,
+compiled_results_df <- data.frame(sample = unique(df_childless$id_col), total_cells = NA, total_dying = NA, dying_ratio = NA,
                                   total_mac = NA, mac_ratio = NA, total_mac_touch = NA,
                                   total_reaped = NA, reaper_ratio = NA, not_reaped_ratio = NA, 
                                   touched_not_mac_before_dying = NA, total_not_mac_touch = NA,
                                   touched_not_mac_dying_ratio = NA, reaped_ratio = NA, 
                                   total_touches = NA, mac_touches = NA, not_mac_touches = NA)
 
-compiled_tall_results_mac <- data.frame(sample = unique(df_childless$.id), cell_type = 'osteoclasts')
-compiled_tall_results_notmac <- data.frame(sample = unique(df_childless$.id), cell_type = 'chondrocytes')
-compiled_tall_results_dying <- data.frame(sample = unique(df_childless$.id), cell_type = 'dying')
-compiled_tall_results_notdying <- data.frame(sample = unique(df_childless$.id), cell_type = 'not_dying')
-compiled_tall_results_reaped <- data.frame(sample = unique(df_childless$.id), cell_type = 'reaped')
-compiled_tall_results_notreaped <- data.frame(sample = unique(df_childless$.id), cell_type = 'not_reaped')
+compiled_tall_results_mac <- data.frame(sample = unique(df_childless$id_col), cell_type = 'osteoclasts')
+compiled_tall_results_notmac <- data.frame(sample = unique(df_childless$id_col), cell_type = 'chondrocytes')
+compiled_tall_results_dying <- data.frame(sample = unique(df_childless$id_col), cell_type = 'dying')
+compiled_tall_results_notdying <- data.frame(sample = unique(df_childless$id_col), cell_type = 'not_dying')
+compiled_tall_results_reaped <- data.frame(sample = unique(df_childless$id_col), cell_type = 'reaped')
+compiled_tall_results_notreaped <- data.frame(sample = unique(df_childless$id_col), cell_type = 'not_reaped')
 
-for (sample_id in 1:length(unique(df_childless$.id))) {
-  temp_df <- df_childless[df_childless$.id == unique(df_childless$.id)[sample_id],]
+for (sample_id in 1:length(unique(df_childless$id_col))) {
+  temp_df <- df_childless[df_childless$id_col == unique(df_childless$id_col)[sample_id],]
   
   compiled_results_df[sample_id, 'total_cells'] <- nrow(temp_df)
   
@@ -385,7 +393,7 @@ t.test(avg_touches ~ cell_type, data=touch_results_tall, paired = TRUE, alternat
 
 
 # histograms
-test2 <- df_childless[df_childless$.id == unique(df_childless$.id)[5],]
+test2 <- df_childless[df_childless$id_col == unique(df_childless$id_col)[5],]
 test2 <- test2 %>% filter(!is.na(first_apoptosis)) %>% select(first_apoptosis, mac_touch_frames, notmac_touch_frames)
 
 df_childless$mac_t_diff <- apply(df_childless, 1, function(x) {x['mac_touch_frames'][[1]] - x['first_apoptosis'][[1]]})
