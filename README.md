@@ -18,12 +18,16 @@ for sparse cells but the high confluence plates are difficult (probably impossib
   in cellpose, but it really struggles to open these files. It's easier to run it in Trackmate, and not much slower.
   - UCSF is getting a supercompute cluster with GPUs, but not too soon.
 
-1. Videos need to be anti-cropped to correct for jumps in the video. Currently this is done semi-manually by noting when
+1. ImageJ script (BG_correct_TUNEL.ijm) that does background correction on the apoptosis fluor. Needs to be run before anti-cropping (step 2) 
+otherwise there are edge effects near background to true black borders. 
+2. Videos need to be anti-cropped to correct for jumps in the video. Currently this is done semi-manually by noting when
 and how severely the videos jump. This is done with 'correct_video_jumps.py'
-2. TODO: make a script to do some sort of background correction on the apoptosis fluor.
-3. The trackmate data is input back to python where we can analyze and summarize the cell activities. At some future point
+3. Run cellpose and Trackmate. Trackmate fortunately runs cellpose on t-stacks automatically
+4. The trackmate data is input back to python where we can analyze and summarize the cell activities. At some future point
 it may (unfortunately) be a good idea to switch the data into some kind of sql database since the ids and tracks are a bit
 convoluted to deal with. Let's see how far we can get without adding that complexity.
    - The labelimages are automatically saved as 16bit which 'only' allows for 65,000 segmentated objects. This problem has
    been resolved with an update.
-4. R script to do the remaining analysis.
+5. Python script that creates a 2 frame 'video' of the last 24hr and first 48hr frames. This needs to be run through 
+Trackmate to create links between the two video files.
+6. R script to do the remaining analysis.

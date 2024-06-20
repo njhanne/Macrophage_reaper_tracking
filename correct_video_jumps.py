@@ -5,7 +5,7 @@ from tifffile import imwrite, imread
 # array / dataframe stuff
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 
 import re
 
@@ -67,6 +67,7 @@ def bound_new_image(jump_info, og_img):
 # I may just use the same jump info for all vids
 
 data_dir = (Path.cwd() / 'data').resolve()
+data_dir = Path("D:/UCSF/macrophage_video_analysis/")
 process_dir = (data_dir / 'processed' / 'BG_corrected').resolve()
 output_dir = (data_dir / 'processed' / 'stabilized_tiffs').resolve()
 image_dirs, image_paths = find_all_filepaths(Path(process_dir), '.tiff')

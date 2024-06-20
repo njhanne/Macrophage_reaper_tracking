@@ -13,7 +13,7 @@ from tkinter import filedialog
 
 import sys
 sys.path.append("./DirFileHelpers")
-from DirFileHelpers.find_all_files import find_all_filepaths
+from find_all_files import find_all_filepaths
 
 
 # 8bit conversion helpers
@@ -51,9 +51,9 @@ def adaptive_8bit(image, lut):
 ### MAIN ###
 # specify settings
 # whether to convert nd2 to tiff
-convert_nd2 = False
+convert_nd2 = True
 convert_8bit = True
-adaptive_thresh = True
+adaptive_thresh = False
 
 training_images_count = 100
 channel = 3
@@ -67,7 +67,7 @@ train_directory = filedialog.askdirectory(title='Select directory to save traini
 
 
 if convert_nd2:
-  image_dirs, image_paths = find_all_filepaths(image_directory, '.nd2')
+  image_dirs, image_paths = find_all_filepaths(Path(image_directory), '.nd2')
   convert_directory = filedialog.askdirectory(title='Select directory of your tiffs to be saved')
   for image_path in image_paths:
     image = nd2.imread(image_path)
@@ -82,18 +82,18 @@ if convert_nd2:
         # image = (image / 256).astype('uint8')
         # image = cv2.convertScaleAbs(image, alpha=1)
     nd2_name = Path(image_path).stem
-    output_name = nd2_name + '_48hr.ome.tiff'
+    output_name = nd2_name + '_24hr.ome.tiff'
     # OME-TIFF should be TZCYX (frustrating) I think these nd2 are already like that
     output_path = Path(convert_directory) / output_name
     imwrite(output_path, image, imagej=True, metadata = {'axes': 'TCYX'})
     # convert_nd2_to_pyramidal_ome_tiff(image, output_path, max_levels = 1)
-
-image_dirs, image_paths = find_all_filepaths(image_directory, '.tiff')
-number_per_stack = ceil(training_images_count / len(image_paths))
-for image_path in image_paths:
-  stack = imread(image_path)
-  slices = random.sample(range(len(stack)), number_per_stack)
-  for slice in slices:
-    output_name = Path(Path(image_path).stem).stem + '_sl' + str(slice) + '.tif'
-    output_path = Path(train_directory) / output_name
-    imwrite(output_path, stack[slice,channel-1,:,:])
+#
+# image_dirs, image_paths = find_all_filepaths(image_directory, '.tiff')
+# number_per_stack = ceil(training_images_count / len(image_paths))
+# for image_path in image_paths:
+#   stack = imread(image_path)
+#   slices = random.sample(range(len(stack)), number_per_stack)
+#   for slice in slices:
+#     output_name = Path(Path(image_path).stem).stem + '_sl' + str(slice) + '.tif'
+#     output_path = Path(train_directory) / output_name
+#     imwrite(output_path, stack[slice,channel-1,:,:])

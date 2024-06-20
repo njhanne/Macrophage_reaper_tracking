@@ -1,6 +1,5 @@
 // https://gist.github.com/romainGuiet/cf42f3b1d31222a76d602dfe2f028894
 dir = "D:/UCSF/macrophage_video_analysis/processed/8bit-tiffs/";
-output_dir = "D:/UCSF/macrophage_video_analysis/processed/8bit-tiffs/BG_corrected/";
 fileList = getFileList(dir);
 
 //activate batch mode
@@ -22,18 +21,10 @@ for (i = 0; i < lengthOf(fileList); i++) {
             img_name = getTitle();
             print(img_name);
 
-            run("Split Channels");
+            setOption("ScaleConversions", true);
+            run("8-bit");
 
-            selectImage("C2-"+img_name);
-            run("Subtract Background...", "rolling=15 sliding stack");
-
-            command_str = "c1=C1-" + img_name + " c2=C2-" + img_name + " c3=C3-" + img_name + " create";
-            run("Merge Channels...", command_str);
-
-            currentImage_name = substring(img_name,0,lengthOf(img_name)-9);
-            currentImage_name = currentImage_name+"_BG";
-            print(currentImage_name);
-            saveAs("tiff", currentImage_name);
+            saveAs("tiff", current_imagePath);
         }
         // make sure to close every images before opening the next one
         run("Close All");

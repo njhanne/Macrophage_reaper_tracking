@@ -60,7 +60,9 @@ show_output = False
 channel_to_process = 3
 
 # Image files to analyse.
-directory_to_process = os.path.normpath("C:/Users/njhan/Box/macrophage_coculture/processed/stabilized_tiffs")
+# directory_to_process = os.path.normpath("C:/Users/njhan/Box/macrophage_coculture/processed/stabilized_tiffs")
+directory_to_process = os.path.normpath("D:/UCSF/macrophage_video_analysis/processed/stabilized_tiffs/test")
+
 file_paths = find_all_filepaths(directory_to_process, '.tiff')
 print(file_paths)
 
@@ -176,7 +178,7 @@ def run(image_file):
   lblImg = LabelImgExporter()
   lblImg.createLabelImagePlus(trackmate, False, False, True, logger).show()
   c = WindowManager.getCurrentImage()
-  IJ.save(c, "C:/Users/njhan/Box/macrophage_coculture/processed/label_images/" + c.getTitle())
+  IJ.save(c, "D:/UCSF/macrophage_video_analysis/processed/label_images/" + c.getTitle())
   c.close()
 
   # ----------------
