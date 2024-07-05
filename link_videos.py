@@ -89,9 +89,10 @@ def get_video_links(tmxml_link, tmxml_24, tmxml_48):
 # - Matching can maybe be done using the centroids?
 
 # load the images and trackmate info
-data_dir = (Path.cwd() / 'data').resolve()
-process_dir = (data_dir / 'processed' / 'label_images').resolve()
-processed_dir = (data_dir / 'processed' / 'stabilized_tiffs').resolve()
+# data_dir = (Path.cwd() / 'data').resolve()
+data_dir = Path("D:/UCSF/macrophage_video_analysis/")
+process_dir = (data_dir / 'processed' / 'label_images' / 'test').resolve()
+processed_dir = (data_dir / 'processed' / 'stabilized_tiffs' / 'test').resolve()
 results_dir = (data_dir / 'results' / 'tracks_csv').resolve()
 
 image_dirs, image_paths = find_all_filepaths(Path(process_dir), '.tiff')
@@ -118,7 +119,9 @@ for sample_name in sample_info['new_filename'].unique():
       xml_path = [xp for xp in link_xml_paths if xp.parts[-1].startswith(this_sample_info['new_filename_timeless'].values[0]+'_link')]
       lmi_path = [lp for lp in image_paths if lp.parts[-1].startswith(this_sample_info['new_filename_timeless'].values[0]+'_link')]
 
-      if len(lmi_path) == 0: # create the link mask file
+      if len(xml_path) == 0:
+        print('No trackmate data found for '+ this_sample_info['new_filename_timeless'].values[0])
+      if len(xml_path) != 0 and len(lmi_path) == 0: # create the link mask file
         print('creating link mask file for '+ this_sample_info['new_filename_timeless'].values[0] +', you will need to run trackmate script in imagej to create the links!')
         lbl_24 = [lp for lp in image_paths if lp.parts[-1].startswith('LblImg_' + this_sample_info['new_filename'].values[0]+'_')]
         lbl_48 = [lp for lp in image_paths if lp.parts[-1].startswith('LblImg_' + paired_sample['new_filename'].values[0]+'_')]

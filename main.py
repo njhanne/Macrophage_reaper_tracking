@@ -155,6 +155,7 @@ def create_cell_tracks(tmxml, frames_to_add=0):
       cell_track['spot_ids'] = list(cell.spotids) # get all the spots in the track
       cell_track['frames'] = list(tmxml.getproperty(cell_track['spot_ids'], 'FRAME')) # get the frame # of each spot
       cell_track['frames'] = [x+frames_to_add for x in cell_track['frames']]
+      cell_track['area'] = list(np.int32(tmxml.getproperty(cell_track['spot_ids'], 'AREA'))) # get the area of each spot
       if cell.parent != 0:
         cell_track['parent_id'] = cell_id + cell.parent
         cell_track['independent_spot_ids'] = list(child_track_alt[track][cell.cell - 1].spotids)
@@ -317,8 +318,8 @@ def get_cell_stats(cell_tracks, cell_spot_LUT, macrophages, apoptotic_cells, tou
 def analyze_xml(tmxml, label_mask, sample_info, this_sample_info, frames_to_add=0, cell_tracks_to_add=0, csv_links=None, cell_stats_24=None):
   # this is so that using debug mode doesn't crash pycharm. It doesn't work with the parallelized processing, unforunately
   debug = False
+  link_results=False # this should not be manually changed, gets changed to True later if needed
 
-  link_results=False
   sample_name = this_sample_info['new_filename'].values[0]
 
   ## get cellularity
@@ -455,7 +456,8 @@ def link_cell_stats(cell_stats_24, cell_stats_48, csv_links):
 
 ### MAIN ###
 ## First find all needed directories and load them all up
-data_dir = (Path.cwd() / 'data').resolve()
+# data_dir = (Path.cwd() / 'data').resolve()
+data_dir = Path("D:/UCSF/macrophage_video_analysis/")
 results_dir = (data_dir / 'results' / 'tracks_csv').resolve()
 xml_directory = (data_dir / 'processed' / 'stabilized_tiffs').resolve()
 lblimgs_directory = (data_dir / 'processed' / 'label_images').resolve()

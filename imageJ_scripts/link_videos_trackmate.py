@@ -60,7 +60,7 @@ show_output = False
 channel_to_process = 3
 
 # Image files to analyse.
-directory_to_process = os.path.normpath("C:/Users/njhan/Box/macrophage_coculture/processed/label_images")
+directory_to_process = os.path.normpath("D:/UCSF/macrophage_video_analysis/processed/label_images/test")
 file_paths = find_all_filepaths(directory_to_process, '_link.tiff')
 print(file_paths)
 

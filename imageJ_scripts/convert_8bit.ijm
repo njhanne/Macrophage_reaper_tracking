@@ -1,5 +1,5 @@
 // https://gist.github.com/romainGuiet/cf42f3b1d31222a76d602dfe2f028894
-dir = "D:/UCSF/macrophage_video_analysis/processed/8bit-tiffs/";
+dir = "D:/UCSF/macrophage_video_analysis/processed/8bit_tiffs/";
 fileList = getFileList(dir);
 
 //activate batch mode
