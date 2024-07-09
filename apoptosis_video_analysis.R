@@ -17,14 +17,179 @@ define_cell_type <- function(temp_df, cell) {
 }
 
 
-# Directory
+process_batch_data <- function(batch_data) {
+  ### Convert all lists to numeric lists
+  # columns_to_numlist <- c("spot_ids", "frames", "apoptotic_frames", "apoptotic_spots",
+  # "macrophage_frames", "macrophage_spots", "touching_frames",
+  # "touching_cells", "neighbor_frames", "neighbor_cells")
+  columns_to_numlist <- c(4:6,8:length(batch_data))
+  
+  for (i in columns_to_numlist) {
+    # get rid of brackets on beginning and end:  str_replace_all(a, '\\[|\\]', '')
+    # convert from one big string to substrings:  strsplit(str_replace_all(a, '\\[|\\]', ''), ', ')
+    # convert to numeric, remove 'name' and make into a list:   list(unname(sapply(a, as.numeric)))
+    # all together:  list(unname(sapply(strsplit(str_replace(a, '\\[|\\]', ''), ', ')[[1]], as.numeric)))
+    # need the I(list()) part to make an 'asis' list, only way to store a list in df 
+    # batch_data[,i] <- I(list(lapply(batch_data[,i], function(x) unname(sapply(strsplit(str_replace(x, '\\[|\\]', ''), ', ')[[1]], as.numeric)))))
+    temp <- lapply(batch_data[,i], function(x) unname(na.omit(sapply(strsplit(str_replace_all(x, '\\[|\\]', ''), ', ')[[1]], as.numeric))))
+    batch_data[,i] <- enframe(temp)[,2]
+  }
+  
+  ### cleanup data
+  # delete cells only present for one frame -- excluding children
+  batch_data$parent_frame_count <- unlist(lapply(deframe(batch_data[,c('cell_id','frames')]), function(x) length(x)))
+  batch_data <- batch_data %>% filter(parent_frame_count > 1)
+  
+  # add in the actual frame count to include children
+  batch_data$frame_count <- unlist(lapply(deframe(batch_data[,c('cell_id','independent_frames')]), function(x) length(x)))
+  batch_data <- batch_data %>% mutate(frame_count = case_when(frame_count == 0 ~ parent_frame_count,
+                                                      TRUE ~ frame_count))
+  
+  
+  ### define cells
+  # macrophages
+  # I think if they are macrophage+ 1/2 of the time, they are macrophages.
+  # They likely won't be 100% of the time because of how the fluorescent 
+  # detection works with trackmate and python
+  # event if they are no longer fluorescing
+  batch_data$mac_frame_ratio <- define_cell_type(batch_data, 'macrophage_frames')
+  batch_data <- batch_data %>% mutate(mac_bool = case_when(mac_frame_ratio > 0.5 ~ TRUE,
+                                                   .default = FALSE))
+  
+  # define apoptotic
+  # These can be more brief, but still want them to be more than a few frames
+  batch_data$dying_frame_ratio <- define_cell_type(batch_data, 'apoptotic_frames')
+  # dead_count <- pmin(unlist(lapply(deframe(batch_data[,c(3,7)]), function(x) length(x))))
+  batch_data <- batch_data %>% mutate(dying_bool = case_when(dying_frame_ratio > 0.3 ~ TRUE,
+                                                     .default = FALSE))
+  
+  ### when touched
+  # right now touching is determined by two lists, one of all the cell ids they touch
+  # and one of the frame it occured on. They are in the same order... so:
+  # touching_cells: [3,6,1] and touching_frames: [1,1,2]
+  # means taht in frame 1 it is touching cell 3 and 6 and in frame 2 it touches cell 1
+  # we can just make another list of booleans of whether the touch was a mac or not
+  
+  # we want the touch history to be transferred to children as well, but only from
+  # before they split... this is a fun complicated problem!
+  # actually it's even more complicated than that. All parents cease to exist after children split so probably should not
+  # even be considered cells. Also that means that children have technically been touching the entire parent line...
+  
+  # first make the mac_touch bool
+  # temp <- batch_data %>% filter(map_lgl(cell_id, ~ any(unlist(test['touching_cells']) %in% .x)))
+  # temp<- batch_data[is.element(batch_data$cell_id,  unlist(test['touching_cells'])),]
+  # this is now way too slow, I should change this to a LUT
+  batch_data[, 'touching_mac'] <- NA
+  for (sample_id in 1:length(unique(batch_data$.id))) {
+    print(sample_id)
+    temp_df <- batch_data[batch_data$.id == unique(batch_data$.id)[sample_id],]
+    temp_LUT <- temp_df[c('cell_id', 'mac_bool')]
+    
+    for (i in 1:nrow(temp_df)) {
+      if (length(temp_df[i,'touching_cells'][[1]]) != 0) {
+        # temp_df[i,'touching_mac'] <- enframe(list(unname(do.call("rbind",lapply(unlist(temp_df[i,'touching_cells']), function(x) temp_df[temp_df$cell_id == x,]))['mac_bool'])))[,2]
+        temp_df[i,'touching_mac'] <- enframe(list(unname(do.call("rbind",lapply(unlist(temp_df[i,'touching_cells']), function(x) temp_LUT[x,][2])))))[2]
+      }
+    }
+    batch_data[batch_data$.id == unique(batch_data$.id)[sample_id],]$touching_mac <- temp_df$touching_mac
+  }
+  temp <- apply(batch_data, 1, function(x) {ifelse(is.na(x['touching_mac']), list(), list(unlist(unname(x['touching_mac']))))})
+  temp <- lapply(temp, unlist)
+  temp <- lapply(temp, unname)
+  batch_data['touching_mac'] <- enframe(temp)[,2]
+  
+  
+  # for now this is how we will handle parents/children:
+  # consider the parent as just when the children are co-existent
+  # they will inherit all the 'touching' as the parent,
+  # and then later we won't look at parent cells at all in analysis
+  # NOTE: The touching doesn't get inherited to the 'touched'. 
+  # I think this is ok...
+  
+  # Since the loop goes in row order the first children should always run before
+  # their own children
+  # this one is also quite slow
+  # it also totally messes up the dtypes that we setup so nicely above...
+  for (sample_id in 1:length(unique(batch_data$.id))) {
+    print(sample_id)
+    temp_df <- batch_data[batch_data$.id == unique(batch_data$.id)[sample_id],]
+    
+    for (i in 1:nrow(temp_df)) {
+      if (!is.na(temp_df[i,'parent_id'])) {
+        parent_row <- temp_df[temp_df$cell_id == temp_df[i,'parent_id'],]
+        temp_df[i,'touching_cells'] <- enframe(list(unlist(c(parent_row['touching_cells'][[1]], temp_df[i,'touching_cells'][[1]]))))[,2]
+        temp_df[i,'touching_frames'] <- enframe(list(unlist(c(parent_row['touching_frames'][[1]], temp_df[i,'touching_frames'][[1]]))))[,2]
+        temp_df[i,'neighbor_cells'] <- enframe(list(unlist(c(parent_row['neighbor_cells'][[1]], temp_df[i,'neighbor_cells'][[1]]))))[,2]
+        temp_df[i,'neighbor_frames'] <- enframe(list(unlist(c(parent_row['neighbor_frames'][[1]], temp_df[i,'neighbor_frames'][[1]]))))[,2]
+        temp_df[i,'touching_mac'] <- enframe(list(unlist(c(parent_row['touching_mac'][[1]], temp_df[i,'touching_mac'][[1]]))))[,2]
+      }
+    }
+    batch_data[batch_data$.id == unique(batch_data$.id)[sample_id],] <- temp_df
+  }
+  
+  # batch_data['touching_mac']<-enframe(lapply(batch_data['touching_mac'][[1]], function(x) list(unlist(x))[[1]]))[,2]
+  
+  temp <- apply(batch_data, 1, function(x) {
+    ifelse(is.null(unlist(x['touching_mac'])), list(), list(unlist(unname(Map(`[`, unlist(x['touching_frames']), unlist(x['touching_mac']))))))})
+  temp <- lapply(temp, unlist)
+  temp <- lapply(temp, unname)
+  batch_data['mac_touch_frames'] <- enframe(temp)[,2]
+  
+  temp <- apply(batch_data, 1, function(x) {
+    ifelse(is.null(unlist(x['touching_mac'])), list(), list(unlist(unname(Map(`[`, unlist(x['touching_frames']), !unlist(x['touching_mac']))))))})
+  temp <- lapply(temp, unlist)
+  temp <- lapply(temp, unname)
+  batch_data['notmac_touch_frames'] <- enframe(temp)[,2]
+  
+  
+  # first mac touch
+  # this is so damn ugly my god
+  batch_data['first_mac_touch'] <- unlist(lapply(batch_data['touching_mac'][[1]], function(x) match('TRUE', x)))
+  batch_data['first_mac_touch'] <- apply(batch_data, 1, function(x) {
+    ifelse(is.na(x['first_mac_touch']), NA, x['touching_frames'][[1]][ x['first_mac_touch'][[1]][[1]][1] ] )})
+  
+  # how many touches
+  batch_data['cell_touches'] <- unlist(lapply(batch_data['touching_mac'][[1]], function(x) length(na.omit(x))))
+  
+  # how many mac touches # sum only counts 'TRUE'
+  batch_data['mac_touches'] <- unlist(lapply(batch_data['touching_mac'][[1]], function(x) sum(na.omit(x))))
+  
+  # how many not-mac touches
+  batch_data['not_mac_touches'] <- batch_data['cell_touches'] - batch_data['mac_touches']
+  
+  # how many spots per track
+  batch_data['track_length'] <- unlist(lapply(batch_data['frames'][[1]], function(x) length(x)))
+  
+  # first apoptosis
+  batch_data <- batch_data %>% rowwise() %>% mutate(first_apoptosis = ifelse(!is.null(apoptotic_frames[1][[1]]), unlist(apoptotic_frames[1][[1]]),  NA))
+  
+  # first touch
+  batch_data <- batch_data %>% rowwise() %>% mutate(first_touch = ifelse(!is.null(touching_frames[1][[1]]), unlist(touching_frames[1][[1]]),  NA))
+  
+  # last mac touch before apoptosis
+  
+  # t between mac touch and apoptosis
+  batch_data <- batch_data %>% mutate(reaper_time = case_when((dying_bool & !is.na(first_mac_touch)) ~ first_apoptosis - first_mac_touch,
+                                                      TRUE ~ NA))
+  # t between any touch and apoptosis
+  batch_data <- batch_data %>% mutate(pre_death_touch_time = case_when((dying_bool & !is.na(first_touch)) ~ first_apoptosis - first_touch,
+                                                               TRUE ~ NA))
+  
+  # batch_data <- batch_data %>% mutate(pre_death_touch_time = case_when((dying_bool & !is.na(first_touch)) ~ first_apoptosis - first_touch,
+  #                                                              TRUE ~ NA))
+  return(batch_data)
+}
+
+
+#### MAIN ####
+#### 0.1 Directory ####
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
 getwd() #check our working directory
 setwd("./data/")
 
 sample_info <- read.csv('image_log_out.csv')
 
-# Load data
+#### 0.2 Load data ####
 setwd("./results/tracks_csv/")
 
 samples <- unique(sample_info$new_filename_timeless)
@@ -40,183 +205,66 @@ samples_to_keep <- str_c(samples_to_keep, '.csv')
 samples_to_load <- samples_to_keep[samples_to_keep %in% results_csvs]
 samples_to_load <- c(samples_to_load, combined_csvs)
 
-# read them all into a list, these can be very slow
-samples_loaded_names <- str_extract(samples_to_load, '^(.*).csv$', group=1)
-df_all <- readRDS('combined_csvs_processed.Rda')
-
-df_all <- lapply(samples_to_load, read.csv)
-df_all <- rbindlist(df_all, idcol=TRUE)
-df_all$.id = samples_loaded_names[df_all$.id] # put file name into the df
-df_all <- df_all[,!2] # gets rid of first useless added column
-df_all <- as.data.frame(df_all) # convert datatable back to df
-
-### Convert all lists to numeric lists
-# columns_to_numlist <- c("spot_ids", "frames", "apoptotic_frames", "apoptotic_spots",
-# "macrophage_frames", "macrophage_spots", "touching_frames",
-# "touching_cells", "neighbor_frames", "neighbor_cells")
-columns_to_numlist <- c(4:5,7:length(df_all))
-
-for (i in columns_to_numlist) {
-  # get rid of brackets on beginning and end:  str_replace_all(a, '\\[|\\]', '')
-  # convert from one big string to substrings:  strsplit(str_replace_all(a, '\\[|\\]', ''), ', ')
-  # convert to numeric, remove 'name' and make into a list:   list(unname(sapply(a, as.numeric)))
-  # all together:  list(unname(sapply(strsplit(str_replace(a, '\\[|\\]', ''), ', ')[[1]], as.numeric)))
-  # need the I(list()) part to make an 'asis' list, only way to store a list in df 
-  # df_all[,i] <- I(list(lapply(df_all[,i], function(x) unname(sapply(strsplit(str_replace(x, '\\[|\\]', ''), ', ')[[1]], as.numeric)))))
-  temp <- lapply(df_all[,i], function(x) unname(na.omit(sapply(strsplit(str_replace_all(x, '\\[|\\]', ''), ', ')[[1]], as.numeric))))
-  df_all[,i] <- enframe(temp)[,2]
-}
-
-### cleanup data
-# delete cells only present for one frame -- excluding children
-df_all$parent_frame_count <- unlist(lapply(deframe(df_all[,c('cell_id','frames')]), function(x) length(x)))
-df_all <- df_all %>% filter(parent_frame_count > 1)
-
-# add in the actual frame count to include children
-df_all$frame_count <- unlist(lapply(deframe(df_all[,c('cell_id','independent_frames')]), function(x) length(x)))
-df_all <- df_all %>% mutate(frame_count = case_when(frame_count == 0 ~ parent_frame_count,
-                                                    TRUE ~ frame_count))
-
-
-### define cells
-# macrophages
-# I think if they are macrophage+ 1/2 of the time, they are macrophages.
-# They likely won't be 100% of the time because of how the fluorescent 
-# detection works with trackmate and python
-# event if they are no longer fluorescing
-df_all$mac_frame_ratio <- define_cell_type(df_all, 'macrophage_frames')
-df_all <- df_all %>% mutate(mac_bool = case_when(mac_frame_ratio > 0.5 ~ TRUE,
-                                                 .default = FALSE))
-
-# define apoptotic
-# These can be more brief, but still want them to be more than a few frames
-df_all$dying_frame_ratio <- define_cell_type(df_all, 'apoptotic_frames')
-# dead_count <- pmin(unlist(lapply(deframe(df_all[,c(3,7)]), function(x) length(x))))
-df_all <- df_all %>% mutate(dying_bool = case_when(dying_frame_ratio > 0.3 ~ TRUE,
-                                                   .default = FALSE))
-
-
-
-### when touched
-# right now touching is determined by two lists, one of all the cell ids they touch
-# and one of the frame it occured on. They are in the same order... so:
-# touching_cells: [3,6,1] and touching_frames: [1,1,2]
-# means taht in frame 1 it is touching cell 3 and 6 and in frame 2 it touches cell 1
-# we can just make another list of booleans of whether the touch was a mac or not
-
-# we want the touch history to be transferred to children as well, but only from
-# before they split... this is a fun complicated problem!
-# actually it's even more complicated than that. All parents cease to exist after children split so probably should not
-# even be considered cells. Also that means that children have technically been touching the entire parent line...
-
-# first make the mac_touch bool
-# temp <- df_all %>% filter(map_lgl(cell_id, ~ any(unlist(test['touching_cells']) %in% .x)))
-# temp<- df_all[is.element(df_all$cell_id,  unlist(test['touching_cells'])),]
-# this is now way too slow, I should change this to a LUT
-df_all[, 'touching_mac'] <- NA
-for (sample_id in 1:length(unique(df_all$.id))) {
-  print(sample_id)
-  temp_df <- df_all[df_all$.id == unique(df_all$.id)[sample_id],]
-  temp_LUT <- temp_df[c('cell_id', 'mac_bool')]
-  
-  for (i in 1:nrow(temp_df)) {
-    if (length(temp_df[i,'touching_cells'][[1]]) != 0) {
-      # temp_df[i,'touching_mac'] <- enframe(list(unname(do.call("rbind",lapply(unlist(temp_df[i,'touching_cells']), function(x) temp_df[temp_df$cell_id == x,]))['mac_bool'])))[,2]
-      temp_df[i,'touching_mac'] <- enframe(list(unname(do.call("rbind",lapply(unlist(temp_df[i,'touching_cells']), function(x) temp_LUT[x,][2])))))[2]
-    }
+#### 0.2.1 Load previous batches ####
+# here we need some code to handle different batches, we don't want to rerun all 
+# of them every time, the code is quite slow
+setwd('../.')
+completed_batches <- list.files(pattern = ".Rda$")
+batch_nums_to_load <- c('1', '2')
+completed_batch_nums <- str_extract(completed_batches, '(?<=batch_)(.*)(?=.Rda)', group=1)
+batches_to_load <- list()
+for (batch_num in batch_nums_to_load) {
+  match_batch <- str_c('batch_', batch_num, '.Rda')
+  if (batch_num %in% completed_batch_nums) {
+    batches_to_load <- append(batches_to_load, match_batch)
   }
-  df_all[df_all$.id == unique(df_all$.id)[sample_id],]$touching_mac <- temp_df$touching_mac
 }
-temp <- apply(df_all, 1, function(x) {ifelse(is.na(x['touching_mac']), list(), list(unlist(unname(x['touching_mac']))))})
-temp <- lapply(temp, unlist)
-temp <- lapply(temp, unname)
-df_all['touching_mac'] <- enframe(temp)[,2]
+# load in all the batches as a list, then rbind them into a df
+# this step will be slow
+df_all_list <- lapply(batches_to_load, readRDS)
+df_all <- rbindlist(df_all_list, fill=TRUE)
 
+# now remove the already analyzed ones from the 'to analyze' list
+samples_to_drop <- lapply(unique(df_all[,1]), function(x) str_c(x, '.csv'))[[1]]
+samples_to_keep <- !(samples_to_load %in% samples_to_drop)
+samples_to_load <- samples_to_load[samples_to_keep] 
 
-# for now this is how we will handle parents/children:
-# consider the parent as just when the children are co-existent
-# they will inherit all the 'touching' as the parent,
-# and then later we won't look at parent cells at all in analysis
-# NOTE: The touching doesn't get inherited to the 'touched'. 
-# I think this is ok...
+#### 0.2.2 Load new batches ####
+setwd('./tracks_csv/')
 
-# Since the loop goes in row order the first children should always run before
-# their own children
-# this one is also quite slow
-# it also totally messes up the dtypes that we setup so nicely above...
-for (sample_id in 1:length(unique(df_all$.id))) {
-  print(sample_id)
-  temp_df <- df_all[df_all$.id == unique(df_all$.id)[sample_id],]
+batch_nums_to_analyze <- c()
+for (batch_num in batch_nums_to_analyze) {
+  # get all the filenames, add in the underscore, and remove the first match which is NA
+  batch_samples <- str_c(unique(sample_info[sample_info$processing_batch == batch_num,]$new_filename_timeless), '_')[-1] 
+  batch_samples_bool <- str_starts(samples_to_load, str_c(batch_samples, collapse='|'))
+  batch_samples <- samples_to_load[batch_samples_bool]
   
-  for (i in 1:nrow(temp_df)) {
-    if (!is.na(temp_df[i,'parent_id'])) {
-      parent_row <- temp_df[temp_df$cell_id == temp_df[i,'parent_id'],]
-      temp_df[i,'touching_cells'] <- enframe(list(unlist(c(parent_row['touching_cells'][[1]], temp_df[i,'touching_cells'][[1]]))))[,2]
-      temp_df[i,'touching_frames'] <- enframe(list(unlist(c(parent_row['touching_frames'][[1]], temp_df[i,'touching_frames'][[1]]))))[,2]
-      temp_df[i,'neighbor_cells'] <- enframe(list(unlist(c(parent_row['neighbor_cells'][[1]], temp_df[i,'neighbor_cells'][[1]]))))[,2]
-      temp_df[i,'neighbor_frames'] <- enframe(list(unlist(c(parent_row['neighbor_frames'][[1]], temp_df[i,'neighbor_frames'][[1]]))))[,2]
-      temp_df[i,'touching_mac'] <- enframe(list(unlist(c(parent_row['touching_mac'][[1]], temp_df[i,'touching_mac'][[1]]))))[,2]
-    }
-  }
-  df_all[df_all$.id == unique(df_all$.id)[sample_id],] <- temp_df
+  # load the csvs and rbind them into a df, this is slow!
+  df_batch <- lapply(batch_samples, read.csv)
+  df_batch <- rbindlist(df_batch, idcol=TRUE)
+  samples_loaded_names <- str_extract(batch_samples, '^(.*).csv$', group=1)
+  df_batch$.id = samples_loaded_names[df_batch$.id] # put file name into the df
+  df_batch <- df_batch[,!2] # gets rid of first useless added column
+  df_batch <- as.data.frame(df_batch) # convert datatable back to df
+  
+  # process the data into a functional df
+  # makes sense to put this in a function and clean up code
+  df_batch <- process_batch_data(df_batch)
+  
+  # save the batch info
+  setwd('../.')
+  savename <- str_c('batch_',batch_num,'.Rda')
+  saveRDS(df_batch, file=savename)
+  setwd('./tracks_csv/')
+  
+  # add the new batch to combined df_all
+  df_all <- append(df_all, list(as_tibble(df_batch)))
 }
 
-# df_all['touching_mac']<-enframe(lapply(df_all['touching_mac'][[1]], function(x) list(unlist(x))[[1]]))[,2]
-
-temp <- apply(df_all, 1, function(x) {
-  ifelse(is.null(unlist(x['touching_mac'])), list(), list(unlist(unname(Map(`[`, unlist(x['touching_frames']), unlist(x['touching_mac']))))))})
-temp <- lapply(temp, unlist)
-temp <- lapply(temp, unname)
-df_all['mac_touch_frames'] <- enframe(temp)[,2]
-
-temp <- apply(df_all, 1, function(x) {
-  ifelse(is.null(unlist(x['touching_mac'])), list(), list(unlist(unname(Map(`[`, unlist(x['touching_frames']), !unlist(x['touching_mac']))))))})
-temp <- lapply(temp, unlist)
-temp <- lapply(temp, unname)
-df_all['notmac_touch_frames'] <- enframe(temp)[,2]
+df_all <- rbindlist(df_all, fill=TRUE)
 
 
-# first mac touch
-# this is so damn ugly my god
-df_all['first_mac_touch'] <- unlist(lapply(df_all['touching_mac'][[1]], function(x) match('TRUE', x)))
-df_all['first_mac_touch'] <- apply(df_all, 1, function(x) {
-  ifelse(is.na(x['first_mac_touch']), NA, x['touching_frames'][[1]][ x['first_mac_touch'][[1]][[1]][1] ] )})
-
-# how many touches
-df_all['cell_touches'] <- unlist(lapply(df_all['touching_mac'][[1]], function(x) length(na.omit(x))))
-
-# how many mac touches # sum only counts 'TRUE'
-df_all['mac_touches'] <- unlist(lapply(df_all['touching_mac'][[1]], function(x) sum(na.omit(x))))
-
-# how many not-mac touches
-df_all['not_mac_touches'] <- df_all['cell_touches'] - df_all['mac_touches']
-
-# how many spots per track
-df_all['track_length'] <- unlist(lapply(df_all['frames'][[1]], function(x) length(x)))
-
-# first apoptosis
-df_all <- df_all %>% rowwise() %>% mutate(first_apoptosis = ifelse(!is.null(apoptotic_frames[1][[1]]), unlist(apoptotic_frames[1][[1]]),  NA))
-
-# first touch
-df_all <- df_all %>% rowwise() %>% mutate(first_touch = ifelse(!is.null(touching_frames[1][[1]]), unlist(touching_frames[1][[1]]),  NA))
-
-# last mac touch before apoptosis
-
-# t between mac touch and apoptosis
-df_all <- df_all %>% mutate(reaper_time = case_when((dying_bool & !is.na(first_mac_touch)) ~ first_apoptosis - first_mac_touch,
-                                                    TRUE ~ NA))
-# t between any touch and apoptosis
-df_all <- df_all %>% mutate(pre_death_touch_time = case_when((dying_bool & !is.na(first_touch)) ~ first_apoptosis - first_touch,
-                                                             TRUE ~ NA))
-
-df_all <- df_all %>% mutate(pre_death_touch_time = case_when((dying_bool & !is.na(first_touch)) ~ first_apoptosis - first_touch,
-                                                             TRUE ~ NA))
-
-# save the df so we don't have to redo all these slow loops
-saveRDS(df_all, file='combined_csvs_processed.Rda') 
-
-
-### Actual analysis ###
+#### 1.0 Actual analysis ####
 
 df_childless <- data.frame()
 for (sample_id in 1:length(unique(df_all$.id))) {
@@ -315,14 +363,21 @@ for (sample_id in 1:length(unique(df_childless$id_col))) {
 }
 
 # cell type
+compiled_results_df <- compiled_results_df %>% mutate(cell_type = case_when(grepl('atdc5', sample) ~ 'ATDC5',
+                                                                            grepl('callus', sample) ~ 'Callus',
+                                                                            TRUE ~ 'Other'))
 compiled_results_tall <- rbind(compiled_tall_results_mac, compiled_tall_results_notmac)
 compiled_results_tall <- inner_join(compiled_results_tall, compiled_results_df[1:2])
 
 compiled_results_taller <- compiled_results_tall %>% pivot_longer(.,-c(total_touches, cell_type, sample, total_cells), names_to = "touch_type", values_to = "touches")
+compiled_results_taller <- compiled_results_taller %>% mutate(cell_type = case_when(cell_type == 'chondrocytes' & grepl('atdc5', sample) ~ 'ATDC5',
+                                                                                    cell_type == 'chondrocytes' & grepl('callus', sample) ~ 'Callus',
+                                                                                    cell_type == 'osteoclasts' ~ 'Osteoclasts', 
+                                                                                    TRUE ~ 'Other'))
 
 
-ggplot(data=compiled_results_taller, aes(x = total_cells, y = touches, shape = cell_type, color = touch_type)) +
-  geom_point() + geom_smooth(method=lm, se=FALSE, fullrange=TRUE) + ylab('touch events per cell')
+ggplot(data=compiled_results_taller, aes(x = total_cells, y = touches, shape = cell_type, color = touch_type, linetype=cell_type)) +
+  geom_point() + geom_smooth(method=lm, se=FALSE, fullrange=FALSE) + ylab('touch events per cell')
 
 
 ggplot(data = compiled_results_taller, aes(x = cell_type, y = touches, fill = touch_type))+
@@ -385,7 +440,7 @@ t.test(ratio ~ cell_type, data=reaper_results_tall, paired = TRUE, alternative =
 
 
 
-touch_results_tall <- compiled_results_df[c(1,15,16)] %>% pivot_longer(cols = 2:3, names_to = 'cell_type', values_to = 'avg_touches')
+touch_results_tall <- compiled_results_df[c(1,14,18)] %>% pivot_longer(cols = 2:3, names_to = 'cell_type', values_to = 'avg_touches')
 touch_results_tall <- touch_results_tall %>% mutate(cell_type = case_when(cell_type == 'mac_touch_ratio' ~ "macrophage",
                                                                             cell_type == 'not_mac_touch_ratio' ~ 'not_macrophage'))
 
@@ -410,12 +465,18 @@ cell_reaper_probs$mac_reaper_ratio <- cell_reaper_probs$mac_reap_count / cell_re
 cell_reaper_probs$notmac_reaper_ratio <- cell_reaper_probs$notmac_reap_count / cell_reaper_probs$notmac_touch_count
 cell_reaper_probs_tall <- cell_reaper_probs[c(1,6,7)] %>% pivot_longer(cols = 2:3, names_to = 'cell_type', values_to = 'reaper_prob')
 
-ggplot(data=cell_reaper_probs_tall) + geom_bar(aes(cell_type, reaper_prob), stat = "summary", fun.y = "mean") + 
-                                      geom_jitter(aes(cell_type, reaper_prob, shape=cell_type), width=0.1)
+cell_reaper_probs_tall <- cell_reaper_probs_tall %>% mutate(cell_type_refined = case_when(cell_type == 'mac_reaper_ratio' & grepl('atdc5', id_col) ~ 'ATDC5 - mac_reap_ratio',
+                                                                                    cell_type == 'mac_reaper_ratio' & grepl('callus', id_col) ~ 'Callus - mac_reap_ratio',
+                                                                                    cell_type == 'notmac_reaper_ratio' & grepl('atdc5', id_col) ~ 'ATDC5 - notmac_reap_ratio',
+                                                                                    cell_type == 'notmac_reaper_ratio' & grepl('callus', id_col) ~ 'Callus - notmac_reap_ratio',
+                                                                                    TRUE ~ 'Other'))
+
+ggplot(data=cell_reaper_probs_tall) + geom_bar(aes(cell_type_refined, reaper_prob), stat = "summary", fun.y = "mean") + 
+                                      geom_jitter(aes(cell_type_refined, reaper_prob, shape=cell_type_refined), width=0.1)
 # this result, together with the 'touched not mac before dying' above, show that
-# dying cells are equally likely to touch mac or not mac and mac and notmac touch
-# dying cells equally likely, BUT
-# cells that don't touch macrophages are much less likely to die
+# dying cells are equally likely to touch mac or notmac 
+# and mac and notmac touch dying cells equally likely, 
+# BUT cells that don't touch macrophages are much less likely to die
 
 
 # histograms
