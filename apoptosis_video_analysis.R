@@ -210,7 +210,7 @@ samples_to_load <- c(samples_to_load, combined_csvs)
 # of them every time, the code is quite slow
 setwd('../.')
 completed_batches <- list.files(pattern = ".Rda$")
-batch_nums_to_load <- c('1', '2')
+batch_nums_to_load <- c('1', '2', '3')
 completed_batch_nums <- str_extract(completed_batches, '(?<=batch_)(.*)(?=.Rda)', group=1)
 batches_to_load <- list()
 for (batch_num in batch_nums_to_load) {
@@ -260,6 +260,7 @@ for (batch_num in batch_nums_to_analyze) {
   df_all <- append(df_all_list, list(as_tibble(df_batch)))
 }
 
+# finalize loading all the lists of dfs
 df_all <- rbindlist(df_all_list, fill=TRUE)
 
 
@@ -362,15 +363,21 @@ for (sample_id in 1:length(unique(df_childless$id_col))) {
 }
 
 # cell type
-compiled_results_df <- compiled_results_df %>% mutate(cell_type = case_when(grepl('atdc5', sample) ~ 'ATDC5',
+compiled_results_df <- compiled_results_df %>% mutate(cell_type = case_when(grepl('atdc5_oc', sample) ~ 'ATDC5_coculture',
+                                                                            grepl('callus_oc', sample) ~ 'Callus_coculture',
+                                                                            grepl('atdc5', sample) ~ 'ATDC5',
                                                                             grepl('callus', sample) ~ 'Callus',
+                                                                            grepl('oc', sample) ~ 'osteoclasts',
                                                                             TRUE ~ 'Other'))
 compiled_results_tall <- rbind(compiled_tall_results_mac, compiled_tall_results_notmac)
 compiled_results_tall <- inner_join(compiled_results_tall, compiled_results_df[1:2])
 
 compiled_results_taller <- compiled_results_tall %>% pivot_longer(.,-c(total_touches, cell_type, sample, total_cells), names_to = "touch_type", values_to = "touches")
-compiled_results_taller <- compiled_results_taller %>% mutate(cell_type = case_when(cell_type == 'chondrocytes' & grepl('atdc5', sample) ~ 'ATDC5',
-                                                                                    cell_type == 'chondrocytes' & grepl('callus', sample) ~ 'Callus',
+compiled_results_taller <- compiled_results_taller %>% mutate(cell_type = case_when(cell_type == 'chondrocytes' & grepl('atdc5_oc', sample) ~ 'ATDC5_coculture',
+                                                                                    cell_type == 'chondrocytes' & grepl('callus_oc', sample) ~ 'Callus_coculture',
+                                                                                    cell_type == 'chondrocytes' & grepl('atdc5', sample) ~ 'ATDC5',
+                                                                                    cell_type == 'osteoclasts' & grepl('callus_oc', sample) ~ 'Osteoclasts_coculture',
+                                                                                    cell_type == 'osteoclasts' & grepl('atdc5_oc', sample) ~ 'Osteoclasts_coculture',
                                                                                     cell_type == 'osteoclasts' ~ 'Osteoclasts', 
                                                                                     TRUE ~ 'Other'))
 
@@ -394,6 +401,13 @@ ggplot(data=dying_results_taller, aes(x = total_cells, y = touches, shape = cell
 
 ggplot(data = dying_results_taller, aes(x = cell_type, y = touches, fill = touch_type))+
   geom_bar(stat = "summary", fun = "mean", position='fill') + ylab('relative touch events per cell')
+
+
+# dying ratio by cell
+ggplot(data=compiled_results_df, aes(x=cell_type, y = dying_ratio)) + geom_bar(stat='summary', fun='mean')
+
+ggplot(data=compiled_results_df, aes(x = total_cells, y = dying_ratio, color = cell_type, linetype=cell_type)) +
+  geom_point() + geom_smooth(method=lm, se=FALSE, fullrange=FALSE) + ylab('death by confluency')
 
 
 # reaped vs not reaped
@@ -430,8 +444,16 @@ t.test(ratio ~ cell_type, data=reaper_results_tall, paired = TRUE, alternative =
 
 
 reaper_results_tall <- compiled_results_df[c(1,13,14)] %>% pivot_longer(cols = 2:3, names_to = 'cell_type', values_to = 'ratio')
-reaper_results_tall <- reaper_results_tall %>% mutate(cell_type = case_when(cell_type == 'reaped_ratio' ~ "reaper ratio",
+reaper_results_tall <- reaper_results_tall %>% mutate(reap_type = case_when(cell_type == 'reaped_ratio' ~ "reaper ratio",
                                                                             cell_type == 'touched_not_mac_dying_ratio' ~ 'not reaped ratio'))
+reaper_results_tall <- reaper_results_tall %>% mutate(cell_type = case_when(grepl('atdc5_oc', sample) ~ 'ATDC5_coculture',
+                                                                            grepl('callus_oc', sample) ~ 'Callus_coculture',
+                                                                            grepl('atdc5', sample) ~ 'ATDC5',
+                                                                            grepl('callus_oc', sample) ~ 'Osteoclasts_coculture',
+                                                                            grepl('atdc5_oc', sample) ~ 'Osteoclasts_coculture',
+                                                                            grepl('oc', sample) ~ 'Osteoclasts',
+                                                                            TRUE ~ 'Other'))
+
 
 ggplot(data=reaper_results_tall) + geom_bar(aes(cell_type, ratio), stat = "summary", fun.y = "mean") + 
                                    geom_jitter(aes(cell_type, ratio, shape=cell_type), width=0.1)
@@ -464,11 +486,15 @@ cell_reaper_probs$mac_reaper_ratio <- cell_reaper_probs$mac_reap_count / cell_re
 cell_reaper_probs$notmac_reaper_ratio <- cell_reaper_probs$notmac_reap_count / cell_reaper_probs$notmac_touch_count
 cell_reaper_probs_tall <- cell_reaper_probs[c(1,6,7)] %>% pivot_longer(cols = 2:3, names_to = 'cell_type', values_to = 'reaper_prob')
 
-cell_reaper_probs_tall <- cell_reaper_probs_tall %>% mutate(cell_type_refined = case_when(cell_type == 'mac_reaper_ratio' & grepl('atdc5', id_col) ~ 'ATDC5 - mac_reap_ratio',
-                                                                                    cell_type == 'mac_reaper_ratio' & grepl('callus', id_col) ~ 'Callus - mac_reap_ratio',
-                                                                                    cell_type == 'notmac_reaper_ratio' & grepl('atdc5', id_col) ~ 'ATDC5 - notmac_reap_ratio',
-                                                                                    cell_type == 'notmac_reaper_ratio' & grepl('callus', id_col) ~ 'Callus - notmac_reap_ratio',
-                                                                                    TRUE ~ 'Other'))
+cell_reaper_probs_tall <- cell_reaper_probs_tall %>% mutate(cell_type_refined = case_when(cell_type == 'mac_reaper_ratio' & grepl('atdc5_oc', id_col) ~ 'ATDC5 - mac_reap_ratio',
+                                                                                          cell_type == 'mac_reaper_ratio' & grepl('atdc5', id_col) ~ 'ATDC5 - self_reap_ratio',
+                                                                                          cell_type == 'mac_reaper_ratio' & grepl('callus_oc', id_col) ~ 'Callus - mac_reap_ratio',
+                                                                                          cell_type == 'mac_reaper_ratio' & grepl('oc', id_col) ~ 'macrophage - self_reap_ratio',
+                                                                                          cell_type == 'notmac_reaper_ratio' & grepl('atdc5_oc', id_col) ~ 'ATDC5 - notmac_reap_ratio',
+                                                                                          cell_type == 'notmac_reaper_ratio' & grepl('atdc5', id_col) ~ 'ATDC5 - self_reap_ratio',
+                                                                                          cell_type == 'notmac_reaper_ratio' & grepl('callus_oc', id_col) ~ 'Callus - notmac_reap_ratio',
+                                                                                          cell_type == 'notmac_reaper_ratio' & grepl('oc', id_col) ~ 'macrophage - self_reap_ratio',
+                                                                                          TRUE ~ 'Other'))
 
 ggplot(data=cell_reaper_probs_tall) + geom_bar(aes(cell_type_refined, reaper_prob), stat = "summary", fun.y = "mean") + 
                                       geom_jitter(aes(cell_type_refined, reaper_prob, shape=cell_type_refined), width=0.1)
@@ -496,7 +522,7 @@ dying_childless$mean_neg_notmac_t_diff <- apply(dying_childless, 1, function(x) 
 avg_touch_t_tall <- dying_childless[c(1,10,11)] %>% pivot_longer(cols = 2:3, names_to = 'cell_type', values_to = 'avg_touch_t') # mean, not median
 
 ggplot(avg_touch_t_tall) + geom_boxplot(aes(avg_touch_t*8/60, id_col, color = cell_type))
-ggplot() + geom_boxplot(data=avg_touch_t_tall, aes(avg_touch_t*8/60, cell_type))
+ ggplot() + geom_boxplot(data=avg_touch_t_tall, aes(avg_touch_t*8/60, cell_type))
 
 
 tall_test <- data.frame()
