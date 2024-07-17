@@ -98,7 +98,7 @@ def run(image_file):
   settings.detectorSettings['OPTIONAL_CHANNEL_2'] = 0
   settings.detectorSettings['CELLPOSE_PYTHON_FILEPATH'] = "C:/Users/njhan/anaconda3/envs/Branches/python.exe"
   settings.detectorSettings['CELLPOSE_MODEL'] = PretrainedModel.CUSTOM
-  settings.detectorSettings['CELLPOSE_MODEL_FILEPATH'] = "C:/Users/njhan/Box/macrophage_coculture/Cellpose_training/models/NH_LB_LC1_HL2"
+  settings.detectorSettings['CELLPOSE_MODEL_FILEPATH'] = "C:/Users/njhan/Box/macrophage_coculture/Cellpose_model/NH_LB_LC1_HL2"
   settings.detectorSettings['CELL_DIAMETER'] = 42.0
   settings.detectorSettings['USE_GPU'] = True
   settings.detectorSettings['SIMPLIFY_CONTOURS'] = False

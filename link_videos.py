@@ -111,55 +111,59 @@ sample_info = pd.read_csv((data_dir / 'image_log.csv').resolve())
 
 for sample_name in sample_info['new_filename'].unique():
   this_sample_info = sample_info.loc[sample_info['new_filename'] == sample_name]
-  if this_sample_info['time'].values[0] == 24: # we don't want to run it on the pairs twice, only look at the 24hr ones
-    paired_sample = sample_info.loc[sample_info['new_filename_timeless'] == this_sample_info['new_filename_timeless'].values[0]]
-    if len(paired_sample) > 1: # only look at ones that actually have pairs
-      paired_sample = paired_sample[paired_sample['time'] == 48]
+  if len(this_sample_info) != 0:
+    if this_sample_info['time'].values[0] == 24: # we don't want to run it on the pairs twice, only look at the 24hr ones
+      paired_sample = sample_info.loc[sample_info['new_filename_timeless'] == this_sample_info['new_filename_timeless'].values[0]]
+      if len(paired_sample) > 1: # only look at ones that actually have pairs
+        paired_sample = paired_sample[paired_sample['time'] == 48]
 
-      xml_path = [xp for xp in link_xml_paths if xp.parts[-1].startswith(this_sample_info['new_filename_timeless'].values[0]+'_link')]
-      lmi_path = [lp for lp in image_paths if lp.parts[-1].startswith(this_sample_info['new_filename_timeless'].values[0]+'_link')]
+        xml_link_path = [xp for xp in link_xml_paths if xp.parts[-1].startswith(this_sample_info['new_filename_timeless'].values[0]+'_link')]
+        lmi_path = [lp for lp in image_paths if lp.parts[-1].startswith(this_sample_info['new_filename_timeless'].values[0]+'_link')]
 
-      if len(xml_path) == 0:
-        print('No trackmate data found for '+ this_sample_info['new_filename_timeless'].values[0])
-      if len(xml_path) != 0 and len(lmi_path) == 0: # create the link mask file
-        print('creating link mask file for '+ this_sample_info['new_filename_timeless'].values[0] +', you will need to run trackmate script in imagej to create the links!')
-        lbl_24 = [lp for lp in image_paths if lp.parts[-1].startswith('LblImg_' + this_sample_info['new_filename'].values[0]+'_')]
-        lbl_48 = [lp for lp in image_paths if lp.parts[-1].startswith('LblImg_' + paired_sample['new_filename'].values[0]+'_')]
+        if len(xml_link_path) == 0 and len(lmi_path) == 0: # create the link mask file
+          lbl_24 = [lp for lp in image_paths if lp.parts[-1].startswith('LblImg_' + this_sample_info['new_filename'].values[0]+'_')]
+          lbl_48 = [lp for lp in image_paths if lp.parts[-1].startswith('LblImg_' + paired_sample['new_filename'].values[0]+'_')]
 
-        combined_mask = np.zeros((2, 2048, 2048), dtype='float32')
-        temp_img = imread(lbl_24[0], key=177) # luckily they are all the same size
-        combined_mask[0, :, :] = temp_img[0:2048, 0:2048]
-        temp_img = imread(lbl_48[0], key=0)
-        combined_mask[1, :, :] = temp_img[temp_img.shape[0]-2048:temp_img.shape[0], 0:2048]
+          if len(lbl_24) != 0 and len(lbl_48) != 0:
+            print('creating link mask file for '+ this_sample_info['new_filename_timeless'].values[0] +', you will need to run trackmate script in imagej to create the links!')
 
-        savename = (Path(process_dir) / (this_sample_info['new_filename_timeless'].values[0]+'_link.tiff')).resolve()
-        imwrite(savename, combined_mask.astype('float32'), imagej=True, metadata={'axes': 'TYX'}, )
+            combined_mask = np.zeros((2, 2048, 2048), dtype='float32')
+            temp_img = imread(lbl_24[0], key=177) # luckily they are all the same size
+            combined_mask[0, :, :] = temp_img[0:2048, 0:2048]
+            temp_img = imread(lbl_48[0], key=0)
+            combined_mask[1, :, :] = temp_img[temp_img.shape[0]-2048:temp_img.shape[0], 0:2048]
 
-      if len(xml_path) != 0 and len(lmi_path) != 0: # link two existing csv with linking xml
-        print('Creating link csv for ' + this_sample_info['new_filename_timeless'].values[0])
-        tmxml_path = [tm for tm in full_xml_paths if tm.parts[-1].startswith(this_sample_info['new_filename'].values[0]+'_')]
-        tmxml_24 = TrackmateXML()
-        try:
-          tmxml_24.loadfile(tmxml_path[0])  # import TrackMate XML
-          loaded= True
-        except:
-          loaded= False
-          print('could not load xml for ' + this_sample_info['new_filename'].values[0])
+            savename = (Path(process_dir) / (this_sample_info['new_filename_timeless'].values[0]+'_link.tiff')).resolve()
+            imwrite(savename, combined_mask.astype('float32'), imagej=True, metadata={'axes': 'TYX'}, )
+          if len(lbl_24) == 0 or len(lbl_48) == 0:
+            if not (len(lbl_24) == 0 and len(lbl_48) == 0):
+              print('could not find complete trackmate data for '+ this_sample_info['new_filename_timeless'].values[0])
 
-        if loaded:
-          tmxml_path = [tm for tm in full_xml_paths if tm.parts[-1].startswith(paired_sample['new_filename'].values[0] + '_')]
-          tmxml_48 = TrackmateXML()
+        if len(xml_link_path) != 0 and len(lmi_path) != 0: # link two existing csv with linking xml
+          print('Creating link csv for ' + this_sample_info['new_filename_timeless'].values[0])
+          tmxml_path = [tm for tm in full_xml_paths if tm.parts[-1].startswith(this_sample_info['new_filename'].values[0]+'_')]
+          tmxml_24 = TrackmateXML()
           try:
-            tmxml_48.loadfile(tmxml_path[0])
+            tmxml_24.loadfile(tmxml_path[0])  # import TrackMate XML
+            loaded= True
           except:
-            loaded = False
-            print('could not load xml for ' + paired_sample['new_filename'].values[0])
-        if loaded:
-            tmxml_path = [tm for tm in link_xml_paths if
-                          tm.parts[-1].startswith(paired_sample['new_filename_timeless'].values[0] + '_link')]
-            tmxml_link = TrackmateXML()
-            tmxml_link.loadfile(tmxml_path[0])
+            loaded= False
+            print('could not load xml for ' + this_sample_info['new_filename'].values[0])
 
-            links_df = get_video_links(tmxml_link, tmxml_24, tmxml_48)
-            save_name = (processed_dir / (this_sample_info['new_filename_timeless'].values[0] + '_links.csv')).resolve()
-            links_df.to_csv(save_name)
+          if loaded:
+            tmxml_path = [tm for tm in full_xml_paths if tm.parts[-1].startswith(paired_sample['new_filename'].values[0] + '_')]
+            tmxml_48 = TrackmateXML()
+            try:
+              tmxml_48.loadfile(tmxml_path[0])
+            except:
+              loaded = False
+              print('could not load xml for ' + paired_sample['new_filename'].values[0])
+          if loaded:
+              tmxml_path = [tm for tm in link_xml_paths if
+                            tm.parts[-1].startswith(paired_sample['new_filename_timeless'].values[0] + '_link')]
+              tmxml_link = TrackmateXML()
+              tmxml_link.loadfile(tmxml_path[0])
+
+              links_df = get_video_links(tmxml_link, tmxml_24, tmxml_48)
+              save_name = (processed_dir / (this_sample_info['new_filename_timeless'].values[0] + '_links.csv')).resolve()
+              links_df.to_csv(save_name)

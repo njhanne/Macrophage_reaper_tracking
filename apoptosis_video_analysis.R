@@ -222,7 +222,6 @@ for (batch_num in batch_nums_to_load) {
 # load in all the batches as a list, then rbind them into a df
 # this step will be slow
 df_all_list <- lapply(batches_to_load, readRDS)
-df_all <- rbindlist(df_all_list, fill=TRUE)
 
 # now remove the already analyzed ones from the 'to analyze' list
 samples_to_drop <- lapply(unique(df_all[,1]), function(x) str_c(x, '.csv'))[[1]]
@@ -232,7 +231,7 @@ samples_to_load <- samples_to_load[samples_to_keep]
 #### 0.2.2 Load new batches ####
 setwd('./tracks_csv/')
 
-batch_nums_to_analyze <- c()
+batch_nums_to_analyze <- c('3')
 for (batch_num in batch_nums_to_analyze) {
   # get all the filenames, add in the underscore, and remove the first match which is NA
   batch_samples <- str_c(unique(sample_info[sample_info$processing_batch == batch_num,]$new_filename_timeless), '_')[-1] 
@@ -258,10 +257,10 @@ for (batch_num in batch_nums_to_analyze) {
   setwd('./tracks_csv/')
   
   # add the new batch to combined df_all
-  df_all <- append(df_all, list(as_tibble(df_batch)))
+  df_all <- append(df_all_list, list(as_tibble(df_batch)))
 }
 
-df_all <- rbindlist(df_all, fill=TRUE)
+df_all <- rbindlist(df_all_list, fill=TRUE)
 
 
 #### 1.0 Actual analysis ####

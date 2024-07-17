@@ -48,8 +48,8 @@ def bound_new_image(jump_info, og_img):
   c_size = og_img.shape[1]
   y_size = og_img.shape[2]
   x_size = og_img.shape[3]
-  jump_info['cumulative_x'] = jump_info['dx'].cumsum()
-  jump_info['cumulative_y'] = jump_info['dy'].cumsum()
+  jump_info.loc[:,'cumulative_x'] = jump_info.loc[:,'dx'].cumsum()
+  jump_info.loc[:,'cumulative_y'] = jump_info.loc[:,'dy'].cumsum()
   new_image = initialize_image(x_size, y_size, t_size, c_size, jump_info)
   new_image = jump_image(og_img, new_image, jump_info, x_size, y_size, t_size)
   return new_image
@@ -68,8 +68,8 @@ def bound_new_image(jump_info, og_img):
 
 data_dir = (Path.cwd() / 'data').resolve()
 data_dir = Path("D:/UCSF/macrophage_video_analysis/")
-process_dir = (data_dir / 'processed' / 'BG_corrected').resolve()
-output_dir = (data_dir / 'processed' / 'stabilized_tiffs').resolve()
+process_dir = (data_dir / 'processed' / 'BG_corrected' / 'test').resolve()
+output_dir = ( data_dir / 'processed' / 'stabilized_tiffs' / 'test').resolve()
 image_dirs, image_paths = find_all_filepaths(Path(process_dir), '.tiff')
 
 image_info_csv = Path(data_dir / 'image_log.csv')
@@ -92,14 +92,13 @@ for image_path in image_paths:
   # match video to dataframe info
   # finds string match between beginning of string and '_crop'. The group tells it to  only get the first match, not the whole string
   # img_jump_info = image_info.loc[image_info['new_filename'].str.startswith(re.search('(.*?)\.ome', image_path.stem).group(1))]
-  img_jump_info = jump_info.loc[jump_info['file name'] == img_info['jump_correction'].values[0]]
+  img_jump_info = jump_info.loc[jump_info['file name'] == img_info['jump_correction'].values[0]].copy() # copy is needed to avoid annoying setwithcopy warning
   new_img = bound_new_image(img_jump_info, original_image)
 
   # plt.imshow(new_img[50,:,:])
   # plt.show()
   savename = (Path(output_dir) / (img_info['new_filename'].values[0] + '_corrected.tiff')).resolve()
-  imwrite(savename, new_img.astype('uint8'), imagej=True, metadata={'axes': 'TCYX'},)
-
+  imwrite(savename, new_img.astype('uint8'), imagej=True, metadata={'axes': 'TCYX'})
 
   # # create the stack
   # if len(dir_images) != 0:

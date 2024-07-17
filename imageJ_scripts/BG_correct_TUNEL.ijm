@@ -1,6 +1,6 @@
 // https://gist.github.com/romainGuiet/cf42f3b1d31222a76d602dfe2f028894
-dir = "D:/UCSF/macrophage_video_analysis/processed/8bit-tiffs/";
-output_dir = "D:/UCSF/macrophage_video_analysis/processed/8bit-tiffs/BG_corrected/";
+dir = "D:/UCSF/macrophage_video_analysis/processed/8bit_tiffs/test/";
+output_dir = "D:/UCSF/macrophage_video_analysis/processed/8bit_tiffs/BG_corrected/";
 fileList = getFileList(dir);
 
 //activate batch mode

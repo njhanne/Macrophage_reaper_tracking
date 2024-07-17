@@ -119,8 +119,12 @@ def find_euclidian_neighbors(tmxml, touching_cells, thresh_distance=50, frames_t
     matches_list = np.take(centroid_list[:,0], matches_list) # another banger function! love this!!
     # find neighbors that are already in touching list and drop them
     touching_list = np.asarray([(k, i) for k, v in touching_cells[frame + frames_to_add].items() for i in v])
-    idx, = np.where((matches_list == touching_list[:,None]).all(axis=-1).any(0)) # https://stackoverflow.com/a/75677754
-    matches_list = np.delete(matches_list, idx, axis=0)
+
+    if matches_list.size != 0: # if there are any cells closer than our neighbor cutoff
+      if touching_list.size != 0: # if there are any cells in the 'touching' list
+        idx, = np.where((matches_list == touching_list[:,None]).all(axis=-1).any(0)) # https://stackoverflow.com/a/75677754
+        matches_list = np.delete(matches_list, idx, axis=0)
+    # no 'else' needed, if there aren't any matches it will make an empty entry
     # group them up
     matches_list = pd.DataFrame(matches_list).groupby([0]).agg(lambda x: list(x))
     matches[frame + frames_to_add] = matches_list.to_dict()[1]
@@ -264,60 +268,75 @@ def temp_cell_tracks_builder(cell_dict, LUT, type, other_dict=None):
     # touch_tall_dict = [(i, k, l) for i, j in list(other_dict.items()) for k, l in j.items()]
 
   temp_df = pd.DataFrame(tall_dict)  # convert to df
-  if type == 'touching' or type == 'neighboring':
-    # column '2' contains lists of all touching cells. This fn will 'flatten' and replicate the other columns.
-    temp_df = temp_df.explode(2)  # this is amazing! I am so happy this function exists
-    # if type == 'neighboring':
-    # I've moved all this functionality into the finding neighbors code. I like the way this was done with the 'merge'
-    # so I'm going to leave it in for future reference
-    #   # this will remove all the neighbors that are actually touching (duplicate from other list)
-    #   touch_temp_df = pd.DataFrame(touch_tall_dict)  # convert to df
-    #   touch_temp_df = touch_temp_df.explode(2)
-    #   exclude_list = temp_df.merge(touch_temp_df, on=[0,1,2], how='outer', indicator=True)
-    #   # 'left only' is only present in temp_df, not in touch_temp_df
-    #   temp_df = touch_temp_df.loc[exclude_list._merge == 'left_only']
-    temp_df[1] = temp_df[1].map(LUT)
-    temp_df[1] = pd.to_numeric(temp_df[1], downcast='integer')
-    temp_df[2] = temp_df[2].map(LUT)
-    temp_df[2] = pd.to_numeric(temp_df[2], downcast='integer')
-    temp_df = temp_df.dropna()
-    temp_df = temp_df.groupby([1]).agg(lambda x: list(x)) # group them up in lists by cell_id
-    temp_df = temp_df.rename_axis("cell_id").reset_index() # get rid of 'rownames'
-    temp_df.columns = col_names # set new colnames
-  else:
-    temp_df['cell_id'] = temp_df[1].map(LUT) #convert spots to track-cells
-    temp_df['cell_id'] = pd.to_numeric(temp_df['cell_id'], downcast='integer') # get rid of 'series' datatype
-    temp_df = temp_df.dropna()
-    temp_df = temp_df.groupby('cell_id').agg(lambda x: list(x)) # group them up in lists by cell_id
-    temp_df = temp_df.rename_axis("cell_id").reset_index() # get rid of 'rownames'
-    temp_df.columns = col_names # set new colnames
+  if temp_df.size != 0:
+    if type == 'touching' or type == 'neighboring':
+      # column '2' contains lists of all touching cells. This fn will 'flatten' and replicate the other columns.
+      temp_df = temp_df.explode(2)  # this is amazing! I am so happy this function exists
+      # if type == 'neighboring':
+      # I've moved all this functionality into the finding neighbors code. I like the way this was done with the 'merge'
+      # so I'm going to leave it in for future reference
+      #   # this will remove all the neighbors that are actually touching (duplicate from other list)
+      #   touch_temp_df = pd.DataFrame(touch_tall_dict)  # convert to df
+      #   touch_temp_df = touch_temp_df.explode(2)
+      #   exclude_list = temp_df.merge(touch_temp_df, on=[0,1,2], how='outer', indicator=True)
+      #   # 'left only' is only present in temp_df, not in touch_temp_df
+      #   temp_df = touch_temp_df.loc[exclude_list._merge == 'left_only']
+      temp_df[1] = temp_df[1].map(LUT)
+      temp_df[1] = pd.to_numeric(temp_df[1], downcast='integer')
+      temp_df[2] = temp_df[2].map(LUT)
+      temp_df[2] = pd.to_numeric(temp_df[2], downcast='integer')
+      temp_df = temp_df.dropna()
+      temp_df = temp_df.groupby([1]).agg(lambda x: list(x)) # group them up in lists by cell_id
+      temp_df = temp_df.rename_axis("cell_id").reset_index() # get rid of 'rownames'
+      temp_df.columns = col_names # set new colnames
+    else:
+      temp_df['cell_id'] = temp_df[1].map(LUT) #convert spots to track-cells
+      temp_df['cell_id'] = pd.to_numeric(temp_df['cell_id'], downcast='integer') # get rid of 'series' datatype
+      temp_df = temp_df.dropna()
+      temp_df = temp_df.groupby('cell_id').agg(lambda x: list(x)) # group them up in lists by cell_id
+      temp_df = temp_df.rename_axis("cell_id").reset_index() # get rid of 'rownames'
+      temp_df.columns = col_names # set new colnames
   return temp_df
 
 
 def get_cell_stats(cell_tracks, cell_spot_LUT, macrophages, apoptotic_cells, touching_cells, distant_neighbors=None):
   # apoptotic spots & frames
   temp_cell_tracks = temp_cell_tracks_builder(apoptotic_cells, cell_spot_LUT, 'apoptotic')
-  cell_tracks = cell_tracks.merge(temp_cell_tracks, on='cell_id', how='outer') # outer merge into cell_track df
+  if temp_cell_tracks.size != 0:
+    cell_tracks = cell_tracks.merge(temp_cell_tracks, on='cell_id', how='outer') # outer merge into cell_track df
+  else:
+    cell_tracks['apoptotic_frames'] = np.nan
+    cell_tracks['apoptotic_spots'] = np.nan
 
   # macrophage spots & frames
   temp_cell_tracks = temp_cell_tracks_builder(macrophages, cell_spot_LUT, 'macrophages')
-  cell_tracks = cell_tracks.merge(temp_cell_tracks, on='cell_id', how='outer')
+  if temp_cell_tracks.size != 0:
+    cell_tracks = cell_tracks.merge(temp_cell_tracks, on='cell_id', how='outer')
+  else:
+    cell_tracks['macrophage_frames'] = np.nan
+    cell_tracks['macrophage_spots'] = np.nan
 
   # touching cells
   temp_cell_tracks = temp_cell_tracks_builder(touching_cells, cell_spot_LUT, 'touching')
-  cell_tracks = cell_tracks.merge(temp_cell_tracks, on='cell_id', how='outer')
+  if temp_cell_tracks.size != 0:
+    cell_tracks = cell_tracks.merge(temp_cell_tracks, on='cell_id', how='outer')
+  else:
+    cell_tracks['touching_frames'] = np.nan
+    cell_tracks['touching_cells'] = np.nan
 
   # neighboring cells (this doesn't seem to work right now)
   if distant_neighbors is not None:
     temp_cell_tracks = temp_cell_tracks_builder(distant_neighbors, cell_spot_LUT, 'neighboring', touching_cells)
-    cell_tracks = cell_tracks.merge(temp_cell_tracks, on='cell_id', how='outer') # outer merge into cell_track df
+    if temp_cell_tracks.size !=0:
+      cell_tracks = cell_tracks.merge(temp_cell_tracks, on='cell_id', how='outer') # outer merge into cell_track df
+    else:
+      cell_tracks['neighbor_frames'] = np.nan
+      cell_tracks['neighbor_cells'] = np.nan
 
   return cell_tracks
 
 
-def analyze_xml(tmxml, label_mask, sample_info, this_sample_info, frames_to_add=0, cell_tracks_to_add=0, csv_links=None, cell_stats_24=None):
-  # this is so that using debug mode doesn't crash pycharm. It doesn't work with the parallelized processing, unforunately
-  debug = False
+def analyze_xml(tmxml, label_mask, sample_info, this_sample_info, debug, frames_to_add=0, cell_tracks_to_add=0, csv_links=None, cell_stats_24=None):
   link_results=False # this should not be manually changed, gets changed to True later if needed
 
   sample_name = this_sample_info['new_filename'].values[0]
@@ -476,6 +495,9 @@ xml_dirs, xml_paths = find_all_filepaths(xml_directory, '.xml')
 lmi_dirs, lmi_paths = find_all_filepaths(lblimgs_directory, '.tiff')
 csv_dirs, csv_paths = find_all_filepaths(xml_directory, '.csv')
 
+# this is so that using debug mode doesn't crash pycharm. It doesn't work with the parallelized processing, unforunately
+debug = False
+
 ## actually loop through and process the trackmate results
 for sample_name in sample_info['new_filename'].unique():
   pair_video = False # boolean to prevent 48 hr analysis if not loaded properly or if it doesn't exist
@@ -515,7 +537,7 @@ for sample_name in sample_info['new_filename'].unique():
       if len(lmi_path) != 0:
         print('Analyzing ' + sample_name)
         label_mask = imread(lmi_path[0])  # import label mask
-        cell_stats_24, sample_info, _ = analyze_xml(tmxml_24, label_mask, sample_info, this_sample_info)
+        cell_stats_24, sample_info, _ = analyze_xml(tmxml_24, label_mask, sample_info, this_sample_info, debug)
         print('Saving 24hr results...')
         save_name = (results_dir / (sample_name + '.csv')).resolve()
         cell_stats_24.to_csv(save_name)
@@ -531,7 +553,7 @@ for sample_name in sample_info['new_filename'].unique():
           frames_to_add = max([t[-1] for t in cell_stats_24['frames']]) + 1
 
           label_mask = imread(lmi_path[0])  # import label mask
-          cell_stats_48, sample_info, combined_results = analyze_xml(tmxml_48, label_mask, sample_info, paired_sample_info, frames_to_add, cell_tracks_to_add, csv_links, cell_stats_24)
+          cell_stats_48, sample_info, combined_results = analyze_xml(tmxml_48, label_mask, sample_info, paired_sample_info, debug, frames_to_add, cell_tracks_to_add, csv_links, cell_stats_24)
           print('Saving 48hr results...')
           save_name = (results_dir / (paired_name + '.csv')).resolve()
           cell_stats_48.to_csv(save_name)
