@@ -343,7 +343,7 @@ def analyze_xml(tmxml, label_mask, sample_info, this_sample_info, debug, frames_
 
   ## get cellularity
   info_rindex = sample_info.loc[sample_info['new_filename'] == sample_name].index.values[0]
-  sample_info.iloc[info_rindex,-2:] = get_cellularity(tmxml, label_mask)
+  sample_info.iloc[info_rindex,-3:-1] = get_cellularity(tmxml, label_mask)
 
   # get cell track lookup table, correct if 48 hr sample
   cell_tracks = create_cell_tracks(tmxml, frames_to_add)
@@ -497,69 +497,95 @@ csv_dirs, csv_paths = find_all_filepaths(xml_directory, '.csv')
 
 # this is so that using debug mode doesn't crash pycharm. It doesn't work with the parallelized processing, unforunately
 debug = False
+# this allows you to run the code and just calculate the overall cellularity w/o all the full analysis
+cellularity_only = True
 
 ## actually loop through and process the trackmate results
 for sample_name in sample_info['new_filename'].unique():
-  pair_video = False # boolean to prevent 48 hr analysis if not loaded properly or if it doesn't exist
-  loaded = False # boolean to prevent 24 hr analysis if not loaded properly
-
   this_sample_info = sample_info.loc[sample_info['new_filename'] == sample_name]
-  # we don't want to run it on the pairs twice, only look at the 24hr ones, also skip ones we want to skip
-  if this_sample_info['time'].values[0] == 24 and this_sample_info['skip'].values[0] != True:
-    # get the 48 hour counterpart
-    paired_sample_info = sample_info.loc[sample_info['new_filename_timeless'] == this_sample_info['new_filename_timeless'].values[0]]
-    if len(paired_sample_info) > 1: # only look at ones that actually have pairs
-      paired_sample_info = paired_sample_info[paired_sample_info['time'] == 48]
-      pair_video = True
-      paired_name = paired_sample_info['new_filename'].values[0]
 
-    # load the xml files. We will do this first to make sure they load correctly. If not we won't run analysis...
-    tmxml_path = [tm for tm in xml_paths if tm.parts[-1].startswith(this_sample_info['new_filename'].values[0] + '_')]
-    tmxml_24 = TrackmateXML()
-    try:
-      tmxml_24.loadfile(tmxml_path[0])  # import TrackMate XML
-      loaded = True
-    except:
-      loaded = False
-      print('could not load xml for ' + this_sample_info['new_filename'].values[0])
-    if loaded and pair_video:
-      tmxml_path = [tm for tm in xml_paths if tm.parts[-1].startswith(paired_name + '_')]
-      tmxml_48 = TrackmateXML()
+  if cellularity_only:
+    sample_name = this_sample_info['new_filename'].values[0]
+    tmxml_path = [tm for tm in xml_paths if tm.parts[-1].startswith(sample_name + '_')]
+    tmxml = TrackmateXML()
+
+    lmi_path = [lp for lp in lmi_paths if lp.parts[-1].startswith('LblImg_' + sample_name + '_')]
+    if len(lmi_path) != 0:
       try:
-        tmxml_48.loadfile(tmxml_path[0])
+        tmxml.loadfile(tmxml_path[0])  # import TrackMate XML
+        loaded = True
       except:
-        pair_video = False
-        print('could not load xml for ' + paired_name)
-
-    # run the analysis
-    if loaded:
-      lmi_path = [lp for lp in lmi_paths if lp.parts[-1].startswith('LblImg_' + sample_name + '_')]
-      if len(lmi_path) != 0:
-        print('Analyzing ' + sample_name)
+        loaded = False
+        print('could not load xml for ' + sample_name)
+      ## get cellularity
+      if loaded:
+        print('analyzing ' + sample_name)
         label_mask = imread(lmi_path[0])  # import label mask
-        cell_stats_24, sample_info, _ = analyze_xml(tmxml_24, label_mask, sample_info, this_sample_info, debug)
-        print('Saving 24hr results...')
-        save_name = (results_dir / (sample_name + '.csv')).resolve()
-        cell_stats_24.to_csv(save_name)
+        info_rindex = sample_info.loc[sample_info['new_filename'] == sample_name].index.values[0]
+        sample_info.iloc[info_rindex, -3:-1] = get_cellularity(tmxml, label_mask)
+    else:
+      print('could not find lblimg for ' + sample_name)
 
-      if pair_video:
-        lmi_path = [lp for lp in lmi_paths if lp.parts[-1].startswith('LblImg_' + paired_name + '_')]
+  else:
+    pair_video = False # boolean to prevent 48 hr analysis if not loaded properly or if it doesn't exist
+    loaded = False # boolean to prevent 24 hr analysis if not loaded properly
+
+    # we don't want to run it on the pairs twice, only look at the 24hr ones, also skip ones we want to skip
+    if this_sample_info['time'].values[0] == 24 and this_sample_info['skip'].values[0] != True:
+      # get the 48 hour counterpart
+      paired_sample_info = sample_info.loc[sample_info['new_filename_timeless'] == this_sample_info['new_filename_timeless'].values[0]]
+      if len(paired_sample_info) > 1: # only look at ones that actually have pairs
+        paired_sample_info = paired_sample_info[paired_sample_info['time'] == 48]
+        pair_video = True
+        paired_name = paired_sample_info['new_filename'].values[0]
+
+      # load the xml files. We will do this first to make sure they load correctly. If not we won't run analysis...
+      tmxml_path = [tm for tm in xml_paths if tm.parts[-1].startswith(this_sample_info['new_filename'].values[0] + '_')]
+      tmxml_24 = TrackmateXML()
+      try:
+        tmxml_24.loadfile(tmxml_path[0])  # import TrackMate XML
+        loaded = True
+      except:
+        loaded = False
+        print('could not load xml for ' + this_sample_info['new_filename'].values[0])
+      if loaded and pair_video:
+        tmxml_path = [tm for tm in xml_paths if tm.parts[-1].startswith(paired_name + '_')]
+        tmxml_48 = TrackmateXML()
+        try:
+          tmxml_48.loadfile(tmxml_path[0])
+        except:
+          pair_video = False
+          print('could not load xml for ' + paired_name)
+
+      # run the analysis
+      if loaded:
+        lmi_path = [lp for lp in lmi_paths if lp.parts[-1].startswith('LblImg_' + sample_name + '_')]
         if len(lmi_path) != 0:
-          print('Analyzing ' + paired_name)
-          csv_link_file = [csv for csv in csv_paths if csv.parts[-1].startswith(this_sample_info['new_filename_timeless'].values[0] + '_links')]
-          csv_links = pd.read_csv(csv_link_file[0])
-
-          cell_tracks_to_add = max(cell_stats_24['cell_id'].to_numpy()) + 1
-          frames_to_add = max([t[-1] for t in cell_stats_24['frames']]) + 1
-
+          print('Analyzing ' + sample_name)
           label_mask = imread(lmi_path[0])  # import label mask
-          cell_stats_48, sample_info, combined_results = analyze_xml(tmxml_48, label_mask, sample_info, paired_sample_info, debug, frames_to_add, cell_tracks_to_add, csv_links, cell_stats_24)
-          print('Saving 48hr results...')
-          save_name = (results_dir / (paired_name + '.csv')).resolve()
-          cell_stats_48.to_csv(save_name)
+          cell_stats_24, sample_info, _ = analyze_xml(tmxml_24, label_mask, sample_info, this_sample_info, debug)
+          print('Saving 24hr results...')
+          save_name = (results_dir / (sample_name + '.csv')).resolve()
+          cell_stats_24.to_csv(save_name)
 
-          print('Saving combined results...')
+        if pair_video:
+          lmi_path = [lp for lp in lmi_paths if lp.parts[-1].startswith('LblImg_' + paired_name + '_')]
+          if len(lmi_path) != 0:
+            print('Analyzing ' + paired_name)
+            csv_link_file = [csv for csv in csv_paths if csv.parts[-1].startswith(this_sample_info['new_filename_timeless'].values[0] + '_links')]
+            csv_links = pd.read_csv(csv_link_file[0])
 
-          save_name = (results_dir / (this_sample_info['new_filename_timeless'].values[0] + '_combined.csv')).resolve()
-          combined_results.to_csv(save_name)
+            cell_tracks_to_add = max(cell_stats_24['cell_id'].to_numpy()) + 1
+            frames_to_add = max([t[-1] for t in cell_stats_24['frames']]) + 1
+
+            label_mask = imread(lmi_path[0])  # import label mask
+            cell_stats_48, sample_info, combined_results = analyze_xml(tmxml_48, label_mask, sample_info, paired_sample_info, debug, frames_to_add, cell_tracks_to_add, csv_links, cell_stats_24)
+            print('Saving 48hr results...')
+            save_name = (results_dir / (paired_name + '.csv')).resolve()
+            cell_stats_48.to_csv(save_name)
+
+            print('Saving combined results...')
+
+            save_name = (results_dir / (this_sample_info['new_filename_timeless'].values[0] + '_combined.csv')).resolve()
+            combined_results.to_csv(save_name)
 sample_info.to_csv((data_dir / 'image_log_out.csv').resolve())
