@@ -116,7 +116,7 @@ id by Trackmate. Funny aside: this labelimage used to be 16bits which only allow
 videos have more 'spots' than that, and the spot_id would just roll over to 0 and restart, which would screw everything up.
 Luckily the Trackmate folks fixed it by outputting to 32bit which allows for over 2 billion spots! Unfortunately the file size is larger, though.
 
-#### 3.5 Housekeeping
+#### Housekeeping
 Each well is imaged for 48 hours, but the raw data is saved in two 24 hr long segments. This is useful for keeping the file
 size down, but means we have to have a way to link the two image files together. The way I get around this, without creating
 a 48hr long image file, is by taking the last 24hr frame and the first 48hr frame and putting them together as a 2 frame image.
@@ -129,11 +129,13 @@ performed in 'main.py' The xml is loaded using a plugin called 'trackmatexml'. N
 available on pip or conda so I had to just include the code directly in this project. Trackmatexml parses the xml data into
 a python dictionary.
 
+#### Touching
 The corresponding labelimage is loaded with the xml and used for determining touching and nearest neighbors. The touching 
 analysis is performed using [scikit-image pixel graph function](https://scikit-image.org/docs/stable/api/skimage.graph.html#skimage.graph.pixel_graph). 
 It is kind of hard to explain with words, but basically it makes an [adjacency matrix](https://en.wikipedia.org/wiki/Adjacency_matrix) for all the pixel values. Since the pixel
 values are equivalent to id, this can be used to determine which cells are touching.
 
+#### Neighboring
 Determining which cells are 'neighbors' (near each other but not touching) is more difficult. I have two methods in the script that each have pros and cons:
 
 a) **Distance from centroid** just looks at the x,y coordinates of the centroid of each cell to compute the euclidean distance
@@ -165,7 +167,7 @@ The Trackmate files can be opened in Trackmate which allows you to play around w
 works best for each image. In the above triptych the left shows all segmented cells in phase contrast, the middle shows 
 macrophages in red, and the right shows apoptotic cells in yellow. These images are from the Trackmate GUI.
 
-#### 5.5. Saving data
+#### Saving data
 Finally the script concatenates all the xml data into lists which are saved into a pandas dataframe, and saved as a csv.
 The xml data has a row for every single spot. Here we have a row for every single track, and a bunch of lists that contain
 info for each spot saved into each cell in the row. It's ugly and pandas is not meant to be used this way, but ultimately 
@@ -184,7 +186,38 @@ but the pandas df will look like this:
 |----|----|----|----|----|
 |(0,1,2,3) |(20,21,22,23) |1| (0,1,1,0)| ...|
 
+Before saving the script also calculates confluency two ways: as the avg % area of the frame that is spots, and as the
+avg number of cells per frame. This is saved in 'image_log_out.csv'
+
 After the 24hr and 48hr images are run together, the script will also automatically link the two pandas results together 
 and save a combined csv with the data for the full 48 hr run. Further analysis is now completed in R.
 
 ### 6. Statistical analysis (and more housekeeping)
+All the R analysis and housekeeping is done with the 'apoptosis_video_analysis.R' script.
+The individual csv files are loaded individually and then combined into a large dataframe. Since the previous steps were all
+performed in batches, the dataframes were also created in batches. The beginning steps of the R code load these batches
+individually and combine them to df_all.
+
+After they've all been loaded the dataframe is culled of parents. In the video files, many of the cells, especially the 
+macrophages pile on top of one another. Cellpose has a very hard time differentiating these individual cells when they are 
+on top of one another and when they seperate Trackmate treats these events as mitosis. The way I deal with this is with the
+assumption that there is no mitosis in these samples. Obviously this is not true, but it is minimal compared to the amount
+of times cells pass over one another. In the script, all parent cells are deleted and their parameters are copied over to their children.
+The image below I hope makes more clear what this part of the code is doing.
+
+![parents_culling](/Readme_images/parents_culling.png)
+
+As a consequence of 'parent culling' we also need to handle children inheriting cell assignment (macrophage, not_macrophage, apoptotic).
+
+![inherited_feats](/Readme_images/child_features.png)
+
+#### Re-assign cell features
+From here we can perform the actual analysis. I change the assignment of cell features from spot to track. As shown with the 
+'macrophage_bool' in the example table above, the features are saved for each spot. In R I set rules that reassign these 
+features to the entire track based on conditions. I say a cell track is a macrophage if 50% of the spots are macrophage_bool
+positive, for example. This is needed because the fluors are not always above threshold, and the apoptotic cells only fluoresce
+for a bit before they ball up and float off the plate.
+
+#### Compiling, graphing, stats
+Here the df is concatenated even further and then changed from wide to tall for easier graphing and analysis. Theres a lot
+here and a lot of it is under active development so I'll leave this as is to be flushed out further when it's more complete.
