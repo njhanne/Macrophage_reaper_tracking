@@ -22,7 +22,7 @@ These are still being developed so the code may not be too clean.
 - The tracking is done with [Trackmate](https://imagej.net/plugins/trackmate/), a plugin for imageJ. It works 
 well! It is mainly limited by the quality of segmentation of cells.
 - Segmentation is done in [Cellpose](https://github.com/MouseLand/cellpose). We have a pretty good training set for Cellpose, and segmentation works quite well 
-for sparse cells but the high confluence plates are more difficult. 
+for sparse cells but the high confluence plates are more difficult.
   - At this point, with plenty of 'in the loop'
   hand training, only the most confluent plate doesn't segment well. The rest are fine! 
 - Running cellpose through trackmate is slow. Cellpose in general is slow for these huge files. Luckily I  can set it and
@@ -36,16 +36,16 @@ forget it O/N and it does fine.
   You can set 3D to false in cellpose, but it really struggles to open these files. It's easier to run it in Trackmate, 
   and not much slower.
   - UCSF is getting a supercompute cluster with GPUs, but not too soon.
-
-3. Run cellpose and Trackmate. Trackmate fortunately runs cellpose on t-stacks automatically
-4. The trackmate data is input back to python where we can analyze and summarize the cell activities. At some future point
-it may (unfortunately) be a good idea to switch the data into some kind of sql database since the ids and tracks are a bit
-convoluted to deal with. Let's see how far we can get without adding that complexity.
-   - The labelimages are automatically saved as 16bit which 'only' allows for 65,000 segmentated objects. This problem has
-   been resolved with an update.
-5. Python script that creates a 2 frame 'video' of the last 24hr and first 48hr frames. This needs to be run through 
-Trackmate to create links between the two video files.
-6. R script to do the remaining analysis.
+- Currently the trackmate xml is converted into pandas which is kind of a pain to work with. The pandas file is then 
+saved as a csv for import into R, which introduces even bigger proglems. R has a big problem with empty frames, lists inside
+of cells, and many more. Basically pandas and R are not supposed to work with this kind of data so htere are a lot of hacky
+workarounds in the code that obfuscate what I am doing and make complex what should be simple.
+  - A workaround would be to not condense all the data but then the R steps will take a VERY long time and the file sizes
+  will be large. I think this is a bad idea.
+  - Another potential workaround is to use SQL instead of a condensed df with a foreign key linking spots to tracks. 
+  This is not ideal either since many of the Python and R steps read and write in the dataframes, which would be dangerous
+  on a database. We don't necessarily want these changes to be permanent.
+  - Maybe xarray? I've used it before for n-dimensional image data but I'm not sure that fits here.
 
 ## Work order
 
@@ -67,6 +67,8 @@ black borders. It does a rolling average, which will make a halo effect on the a
 #### Anti-crop the time series images to correct for camera movement
 Videos need to be anti-cropped to correct for jumps in the video. This is done semi-manually by noting when
 and how severely the videos jump. This is done with 'correct_video_jumps.py'
+
+TODO: add more explanation w/ pics here
 
 ### 2&3.Segment and track the cells w/ Cellpose and Trackmate
 As discussed above, these steps are done by Cellpose and Trackmate, respectively. Since Cellpose runs inside of Trackmate
@@ -104,12 +106,73 @@ and also a track_id if the spot has been linked to other spots across time.
 - The label image file is a greyscale image of each segmentation with the pixel value corresponding to the assigned spot
 id by Trackmate. Funny aside: this labelimage used to be 16bits which only allows for values up to 65,536. Many of these
 videos have more 'spots' than that, and the spot_id would just roll over to 0 and restart, which would screw everything up.
-Luckily the Trackmate folks fixed it by outputting to 32bit which allows for over 2billion spots! Unfortunately the file size is larger, though.
+Luckily the Trackmate folks fixed it by outputting to 32bit which allows for over 2 billion spots! Unfortunately the file size is larger, though.
+
+### 3.5 Housekeeping
+Each well is imaged for 48 hours, but the raw data is saved in two 24 hr long segments. This is useful for keeping the file
+size down, but means we have to have a way to link the two image files together. The way I get around this, without creating
+a 48hr long image file, is by taking the last 24hr frame and the first 48hr frame and putting them together as a 2 frame image.
+This image is then re-run through Trackmate with the 'link_videos_trackmate.py' ImageJ script. Then the linking is completed
+with the 'link_videos.py' script (in Python, not ImageJ).
 
 ### 4. Tracking cell touching
+The trackmate xml data is imported to Python where we can analyze and summarize cell touching. The next few steps are all
+performed in 'main.py' The xml is loaded using a plugin called 'trackmatexml'. None of that code is mine, but it is not
+available on pip or conda so I had to just include the code directly in this project. Trackmatexml parses the xml data into
+a python dictionary.
+
+The corresponding labelimage is loaded with the xml and used for determining touching and nearest neighbors. The touching 
+analysis is performed using [scikit-image pixel graph function](https://scikit-image.org/docs/stable/api/skimage.graph.html#skimage.graph.pixel_graph). 
+It is kind of hard to explain with words, but basically it makes an [adjacency matrix](https://en.wikipedia.org/wiki/Adjacency_matrix) for all the pixel values. Since the pixel
+values are equivalent to id, this can be used to determine which cells are touching.
+
+Determining which cells are 'neighbors' (near each other but not touching) is more difficult. I have two methods in the script that each have pros and cons:
+
+a) **Distance from centroid** just looks at the x,y coordinates of the centroid of each cell to compute the euclidean distance
+between all other centroids in the time frame. If the distance is less than some chosen cutoff, they are near one another.
+- This method is very fast.
+- It does not take into account the actual edges of the cell. If a cell is shaped like a long sliver there could be parts
+of the cell body near/touching a neighbor cell that is quite far from the centroid of the cell.
+
+b) **Expanding the mask** grows each cell mask by a chosen number of pixels and re-runs the cell touching algorithm. This 
+method needs to run for every single spot separately!
+- Extraordinarily slow. Perfectly accurate to strangely shaped cells. Macrophages tend to be oddly shaped...
+- It can be sped up by cropping the image around the cell of interest, but it is still super slow
+
+Because of the time it takes to run the more accurate method I usually just use the euclidian distance. Because of the inaccuracy
+of the Euclidean distance, I don't use the 'neighbor' feature in any further analysis. The 8min time between each frame 
+seems to be sufficient to capture cells touching so I am not sure if the 'neighbor' info is that important, anyway.
 
 ### 5. Assign cell type
+Assigning 'macrophage', 'not macrophage' and 'apoptotic' is performed for each spot based on the statitistics calculated 
+by Trackmate. I set the desired feature and threshold for each image by hand, since they all have different brightnesses.
+These feature names and thresholds are stored in the sample info csv file ('image_log.csv'), along with other important information about the 
+image and settings to use. Generally I use the standard deviation of fluor intensity, mean fluor intensity, or contrast of fluor intensity.
 
-### 5.5 Housekeeping
+TODO image of trackmate gui w/ thresholding
 
-### 6. Statistical analysis
+The Trackmate files can be opened in Trackmate which allows you to play around with the thresholds to get an idea of what 
+works best for each image.
+
+Finally the script concatenates all the xml data into lists which are saved into a pandas dataframe, and saved as a csv.
+The xml data has a row for every single spot. Here we have a row for every single track, and a bunch of lists that contain
+info for each spot saved into each cell in the row. It's ugly and pandas is not meant to be used this way, but ultimately 
+it works. 
+
+As an example the xml may look like this:
+|spot_id|frame|track_id|macrophage_bool|many_more_cols....|
+|----|----|----|----|----|
+|0 |20 |1| 0| ...|
+|1 |21 |1|1| ...|
+|2 |22 |1|1| ...|
+|3 |23 |1|0| ...|
+
+but the pandas df will look like this:
+|spot_id|frame|track_id|
+|----|----|----|macrophage_bool|etc....|
+|(0,1,2,3) |(20,21,22,23) |1| (0,1,1,0)| ...|
+
+After the 24hr and 48hr images are run together, the script will also automatically link the two pandas results together 
+and save a combined csv with the data for the full 48 hr run. Analysis is now completed in R.
+
+### 6. Statistical analysis (and a lot more housekeeping)
