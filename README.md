@@ -60,15 +60,23 @@ rearranges the order of the channels so that they are macrophage(red):apoptosis(
 
 #### Background correction for NucView channel
 ImageJ script 'BG_correct_TUNEL.ijm' runs the background correction command on the apoptosis fluor. This channel is signal
-to noise ratio is awful and needs to be corrected for good assignment of 'apoptotic'.
+to noise ratio is awful (see left image below) and needs to be corrected for good assignment of 'apoptotic'.
 - This command needs to run before anti-cropping (next step) otherwise there are edge effects near background to true 
 black borders. It does a rolling average, which will make a halo effect on the artificial anti-cropped edge.
 
-#### Anti-crop the time series images to correct for camera movement
-Videos need to be anti-cropped to correct for jumps in the video. This is done semi-manually by noting when
-and how severely the videos jump. This is done with 'correct_video_jumps.py'
+![NucView_BG_correction](/Readme_images/background_subtraction.png)
 
-TODO: add more explanation w/ pics here
+#### Anti-crop the time series images to correct for camera movement
+Videos need to be anti-cropped to correct for jumps in the video. I am not sure what causes these jumps, but it totally 
+messes up the tracking if you don't correct them. Most of the images have very similar jump patterns, so maybe it is someone
+walking into the room the microscope is in and slamming the door?
+
+This is done semi-manually by noting when
+and how severely the videos jump. I open each image in ImageJ and scrub through until I notice a jump. I note down the frame
+number and how many pixels it jumps. The 'correct_video_jumps.py' reads the csv of corrections and saves a new tiff with 
+black space that keeps the image stabilized. Kind of hard to explain, but a picture helps: 
+
+![anti_cropping_example](/Readme_images/anti_crop_example.png)
 
 ### 2&3.Segment and track the cells w/ Cellpose and Trackmate
 As discussed above, these steps are done by Cellpose and Trackmate, respectively. Since Cellpose runs inside of Trackmate
@@ -108,7 +116,7 @@ id by Trackmate. Funny aside: this labelimage used to be 16bits which only allow
 videos have more 'spots' than that, and the spot_id would just roll over to 0 and restart, which would screw everything up.
 Luckily the Trackmate folks fixed it by outputting to 32bit which allows for over 2 billion spots! Unfortunately the file size is larger, though.
 
-### 3.5 Housekeeping
+#### 3.5 Housekeeping
 Each well is imaged for 48 hours, but the raw data is saved in two 24 hr long segments. This is useful for keeping the file
 size down, but means we have to have a way to link the two image files together. The way I get around this, without creating
 a 48hr long image file, is by taking the last 24hr frame and the first 48hr frame and putting them together as a 2 frame image.
@@ -139,6 +147,8 @@ method needs to run for every single spot separately!
 - Extraordinarily slow. Perfectly accurate to strangely shaped cells. Macrophages tend to be oddly shaped...
 - It can be sped up by cropping the image around the cell of interest, but it is still super slow
 
+![Neighbor_type_comparison](/Readme_images/distance_calc_rough.png)
+
 Because of the time it takes to run the more accurate method I usually just use the euclidian distance. Because of the inaccuracy
 of the Euclidean distance, I don't use the 'neighbor' feature in any further analysis. The 8min time between each frame 
 seems to be sufficient to capture cells touching so I am not sure if the 'neighbor' info is that important, anyway.
@@ -149,11 +159,13 @@ by Trackmate. I set the desired feature and threshold for each image by hand, si
 These feature names and thresholds are stored in the sample info csv file ('image_log.csv'), along with other important information about the 
 image and settings to use. Generally I use the standard deviation of fluor intensity, mean fluor intensity, or contrast of fluor intensity.
 
-TODO image of trackmate gui w/ thresholding
+![Trackmate_thresholding](/Readme_images/Trackmate_thresh.png)
 
 The Trackmate files can be opened in Trackmate which allows you to play around with the thresholds to get an idea of what 
-works best for each image.
+works best for each image. In the above triptych the left shows all segmented cells in phase contrast, the middle shows 
+macrophages in red, and the right shows apoptotic cells in yellow. These images are from the Trackmate GUI.
 
+#### 5.5. Saving data
 Finally the script concatenates all the xml data into lists which are saved into a pandas dataframe, and saved as a csv.
 The xml data has a row for every single spot. Here we have a row for every single track, and a bunch of lists that contain
 info for each spot saved into each cell in the row. It's ugly and pandas is not meant to be used this way, but ultimately 
@@ -168,11 +180,11 @@ As an example the xml may look like this:
 |3 |23 |1|0| ...|
 
 but the pandas df will look like this:
-|spot_id|frame|track_id|
-|----|----|----|macrophage_bool|etc....|
+|spot_id|frame|track_id|macrophage_bool|etc....|
+|----|----|----|----|----|
 |(0,1,2,3) |(20,21,22,23) |1| (0,1,1,0)| ...|
 
 After the 24hr and 48hr images are run together, the script will also automatically link the two pandas results together 
-and save a combined csv with the data for the full 48 hr run. Analysis is now completed in R.
+and save a combined csv with the data for the full 48 hr run. Further analysis is now completed in R.
 
-### 6. Statistical analysis (and a lot more housekeeping)
+### 6. Statistical analysis (and more housekeeping)
