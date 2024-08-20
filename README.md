@@ -205,11 +205,11 @@ assumption that there is no mitosis in these samples. Obviously this is not true
 of times cells pass over one another. In the script, all parent cells are deleted and their parameters are copied over to their children.
 The image below I hope makes more clear what this part of the code is doing.
 
-![parents_culling](/Readme_images/parents_culling.png)
+<img src="/Readme_images/parents_culling.png" width=50% height=50%>
 
 As a consequence of 'parent culling' we also need to handle children inheriting cell assignment (macrophage, not_macrophage, apoptotic).
 
-![inherited_feats](/Readme_images/child_features.png)
+<img src="/Readme_images/child_features.png" width=50% height=50%>
 
 #### Re-assign cell features
 From here we can perform the actual analysis. I change the assignment of cell features from spot to track. As shown with the 
