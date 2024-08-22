@@ -69,7 +69,7 @@ black borders. It does a rolling average, which will make a halo effect on the a
 #### Anti-crop the time series images to correct for camera movement
 Videos need to be anti-cropped to correct for jumps in the video. I am not sure what causes these jumps, but it totally 
 messes up the tracking if you don't correct them. Most of the images have very similar jump patterns, so maybe it is someone
-walking into the room the microscope is in and slamming the door?
+walking into the microscope room and slamming the door?
 
 This is done semi-manually by noting when
 and how severely the videos jump. I open each image in ImageJ and scrub through until I notice a jump. I note down the frame
