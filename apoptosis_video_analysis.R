@@ -210,7 +210,7 @@ samples_to_load <- c(samples_to_load, combined_csvs)
 # of them every time, the code is quite slow
 setwd('../.')
 completed_batches <- list.files(pattern = ".Rda$")
-batch_nums_to_load <- c('1', '2', '3')
+batch_nums_to_load <- c('1', '2', '3', '4')
 completed_batch_nums <- str_extract(completed_batches, '(?<=batch_)(.*)(?=.Rda)', group=1)
 batches_to_load <- list()
 for (batch_num in batch_nums_to_load) {
@@ -458,7 +458,7 @@ for (group_i in 1:length(levels(compiled_results_tall$cell_type))) {
 # P(nomactouch and death) = a = P(death) * P(observed death after not touching mac) / P(notmactouch)
 # P(nomactouch and notdeath) = b
 compiled_results_df$bayes_prob <- (compiled_results_df$total_dying / compiled_results_df$total_cells) * compiled_results_df$reap_prob / (compiled_results_df$touched_mac / compiled_results_df$total_cells)
-compiled_results_df$bayes_prob_no <- (compiled_results_df$total_dying / compiled_results_df$total_cells) * compiled_results_df$not_reaped_ratio / (compiled_results_df$touched_mac / compiled_results_df$total_cells)
+compiled_results_df$bayes_prob_no <- (compiled_results_df$total_dying / compiled_results_df$total_cells) * compiled_results_df$not_reaped_ratio / (compiled_results_df$not_touched_mac / compiled_results_df$total_cells)
 
 compiled_results_tall <- compiled_results_df %>% select(sample, cell_type, bayes_prob_no, bayes_prob) 
 compiled_results_tall <- compiled_results_tall %>% pivot_longer(-c(cell_type, sample), names_to = "prob_type", values_to = "probability")
@@ -571,6 +571,7 @@ t.test(ratio ~ cell_type, data=reaper_results_tall, paired = TRUE, alternative =
 
 
 
+# reap vs never touched mac and dies ## primary result ##
 reaper_results_tall <- compiled_results_df[c(1,13,14)] %>% pivot_longer(cols = 2:3, names_to = 'cell_type', values_to = 'ratio')
 reaper_results_tall <- reaper_results_tall %>% mutate(reap_type = case_when(cell_type == 'reaped_ratio' ~ "reaped",
                                                                             cell_type == 'touched_not_mac_dying_ratio' ~ 'not reaped'))
@@ -597,6 +598,8 @@ for (group_i in 1:length(levels(reaper_results_tall$cell_type))) {
   print(levels(reaper_results_tall$cell_type)[group_i])
   print(t.test(ratio ~ reap_type, data=temp_df, paired = TRUE, alternative = "two.sided"))
 }
+
+test <- reaper_results_tall %>% group_by(cell_type, reap_type) %>% dplyr::summarize(Mean = mean(ratio, na.rm=TRUE))
 
 
 
