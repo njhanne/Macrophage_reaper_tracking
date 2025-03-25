@@ -233,11 +233,11 @@ samples_to_load <- samples_to_load[samples_to_keep]
 #### 0.2.2 Load new batches ####
 setwd('./tracks_csv/')
 
-batch_nums_to_analyze <- c('4')
+batch_nums_to_analyze <- c('5')
 for (batch_num in batch_nums_to_analyze) {
   # get all the filenames, add in the underscore, and remove the first match which is NA
   batch_samples <- str_c(unique(sample_info[sample_info$processing_batch == batch_num,]$new_filename_timeless), '_')[-1] 
-  batch_samples_bool <- str_starts(samples_to_load, str_c(batch_samples, collapse='|'))
+  batch_samples_bool <- str_detect(str_c(batch_samples, collapse='|'), str_remove(samples_to_load, '.csv'))
   batch_samples <- samples_to_load[batch_samples_bool]
   
   # load the csvs and rbind them into a df, this is slow!
@@ -259,7 +259,7 @@ for (batch_num in batch_nums_to_analyze) {
   setwd('./tracks_csv/')
   
   # add the new batch to combined df_all
-  df_all <- append(df_all_list, list(as_tibble(df_batch)))
+  df_all_list <- append(df_all_list, list(as_tibble(df_batch)))
 }
 
 # finalize loading all the lists of dfs
@@ -299,7 +299,7 @@ for (sample_num in 1:length(unique(df_childless$id_col))) {
     match <- sample_info[sample_info$new_filename == sample_id,]
   }
   else {
-    match <- NA
+    match <- sample_info[sample_info$new_filename == sample_id,]
   }
   compiled_confluence_df[sample_num, 'cell_area'] <- mean(match$avg_cell_area)
   compiled_confluence_df[sample_num, "avg_cell_num"] <- mean(match$avg_cell_count)
@@ -400,8 +400,10 @@ for (sample_id in 1:length(unique(df_childless$id_col))) {
 }
 
 # cleanup the compiled data
-compiled_results_df <- compiled_results_df %>% mutate(cell_type = case_when(grepl('atdc5_oc', sample) ~ 'ATDC5_coculture',
+compiled_results_df <- compiled_results_df %>% mutate(cell_type = case_when(grepl('TW1_atdc5_oc', sample) ~ 'transwell_coculture',
+                                                                            grepl('atdc5_oc', sample) ~ 'ATDC5_coculture',
                                                                             grepl('callus_oc', sample) ~ 'Callus_coculture',
+                                                                            grepl('TW1_atdc5', sample) ~ 'transwell_ATDC5',
                                                                             grepl('atdc5', sample) ~ 'ATDC5',
                                                                             grepl('callus', sample) ~ 'Callus',
                                                                             grepl('oc', sample) ~ 'Osteoclasts',
@@ -413,7 +415,7 @@ compiled_results_df <- left_join(compiled_results_df, compiled_confluence_df)
 
 
 ### Graph helping ###
-pal <- c('#cc3311', '#bbbbbb', '#ee7733', '#0077bb')
+pal <- c('#cc3311', '#bbbbbb', '#ee7733', '#0077bb', '#33bbee', '#cc3311')
 
 
 # test different confluence calcs
@@ -483,16 +485,21 @@ for (group_i in 2:length(levels(compiled_results_tall$cell_type))) {
 ### cell touching analysis
 # cell type
 compiled_results_tall <- rbind(compiled_tall_results_mac, compiled_tall_results_notmac)
-compiled_results_tall <- inner_join(compiled_results_tall, compiled_results_df[c(1,2,19,20)])
+compiled_results_tall <- left_join(compiled_results_tall, compiled_results_df[c(1,2,20,21)])
+compiled_results_tall <- compiled_results_tall %>% mutate(cell_type = case_when(cell_type == 'chondrocytes' & grepl('TW1_atdc5_oc', sample) ~ 'ATDC5_transwell_coculture',
+                                                                                    cell_type == 'chondrocytes' & grepl('atdc5_oc', sample) ~ 'ATDC5_coculture',
+                                                                                    cell_type == 'chondrocytes' & grepl('callus_oc', sample) ~ 'Callus_coculture',
+                                                                                    cell_type == 'chondrocytes' & grepl('TW1_atdc5', sample) ~ 'ATDC5_transwell',
+                                                                                    cell_type == 'chondrocytes' & grepl('atdc5', sample) ~ 'ATDC5',
+                                                                                    cell_type == 'osteoclasts' & grepl('callus_oc', sample) ~ 'Osteoclasts_coculture',
+                                                                                    cell_type == 'osteoclasts' & grepl('TW1_atdc5_oc', sample) ~ 'Osteoclasts_transwell_coculture',
+                                                                                    cell_type == 'osteoclasts' & grepl('TW1_atdc5', sample) ~ 'Osteoclasts_transwell_mono',
+                                                                                    cell_type == 'osteoclasts' & grepl('atdc5_oc', sample) ~ 'Osteoclasts_coculture',
+                                                                                    cell_type == 'osteoclasts' ~ 'Osteoclasts',
+                                                                                    TRUE ~ 'Other'))
 
 compiled_results_taller <- compiled_results_tall %>% pivot_longer(.,-c(total_touches, cell_type, sample, cell_area, total_cells, avg_cell_num), names_to = "touch_type", values_to = "touches")
-compiled_results_taller <- compiled_results_taller %>% mutate(cell_type = case_when(cell_type == 'chondrocytes' & grepl('atdc5_oc', sample) ~ 'ATDC5_coculture',
-                                                                                    cell_type == 'chondrocytes' & grepl('callus_oc', sample) ~ 'Callus_coculture',
-                                                                                    cell_type == 'chondrocytes' & grepl('atdc5', sample) ~ 'ATDC5',
-                                                                                    cell_type == 'Osteoclasts' & grepl('callus_oc', sample) ~ 'Osteoclasts_coculture',
-                                                                                    cell_type == 'Osteoclasts' & grepl('atdc5_oc', sample) ~ 'Osteoclasts_coculture',
-                                                                                    cell_type == 'Osteoclasts' ~ 'Osteoclasts', 
-                                                                                    TRUE ~ 'Other'))
+
 
 
 ggplot(data=compiled_results_taller, aes(x = total_cells, y = touches, shape = cell_type, color = touch_type, linetype=cell_type)) +
@@ -505,7 +512,7 @@ ggplot(data = compiled_results_taller, aes(x = cell_type, y = touches, fill = to
 
 # touching for dying vs not dying
 dying_results_tall <- rbind(compiled_tall_results_dying, compiled_tall_results_notdying)
-dying_results_tall <- inner_join(dying_results_tall, compiled_results_df[c(1,2,19,20)])
+dying_results_tall <- inner_join(dying_results_tall, compiled_results_df[c(1,2,20,21)])
 
 dying_results_taller <- dying_results_tall %>% pivot_longer(.,-c(total_touches, cell_type, sample, total_cells, cell_area, avg_cell_num), names_to = "touch_type", values_to = "touches")
 
@@ -519,7 +526,7 @@ ggplot(data = dying_results_taller, aes(x = cell_type, y = touches, fill = touch
 
 ### Death analysis
 # dying ratio by cell
-compiled_results_df$cell_type <- factor(compiled_results_df$cell_type, levels=c('Osteoclasts', 'ATDC5', 'ATDC5_coculture', 'Callus_coculture'))
+compiled_results_df$cell_type <- factor(compiled_results_df$cell_type, levels=c('Osteoclasts', 'ATDC5', 'ATDC5_coculture', 'Callus_coculture', 'transwell_coculture', 'transwell_ATDC5'))
 
 ggplot(data=compiled_results_df, aes(x=cell_type, y = dying_ratio*100, fill = cell_type)) +
   geom_bar(stat='summary', fun='mean') + 
@@ -540,7 +547,7 @@ TukeyHSD(death_by_culture)
 
 # reaped vs not reaped
 reaped_results_tall <- rbind(compiled_tall_results_reaped, compiled_tall_results_notreaped)
-reaped_results_tall <- inner_join(reaped_results_tall, compiled_results_df[c(1,2,19,20)], by='sample')
+reaped_results_tall <- inner_join(reaped_results_tall, compiled_results_df[c(1,2,20,21)], by='sample')
 
 reaped_results_taller <- reaped_results_tall %>% pivot_longer(.,-c(total_touches, cell_type, sample, total_cells, cell_area, avg_cell_num), names_to = "touch_type", values_to = "touches")
 
@@ -552,7 +559,7 @@ ggplot(data = reaped_results_taller, aes(x = cell_type, y = touches, fill = touc
 
 
 reaped_results_tall2 <- rbind(compiled_tall_results_reaped, compiled_tall_results_notdying)
-reaped_results_tall2 <- inner_join(reaped_results_tall2, compiled_results_df[c(1,2,19,20)])
+reaped_results_tall2 <- inner_join(reaped_results_tall2, compiled_results_df[c(1,2,20,21)])
 reaped_results_taller2 <- reaped_results_tall2 %>% pivot_longer(.,-c(total_touches, cell_type, sample, total_cells, cell_area, avg_cell_num), names_to = "touch_type", values_to = "touches")
 
 ggplot(data = reaped_results_taller2, aes(x = cell_type, y = touches, fill = touch_type))+
@@ -575,8 +582,10 @@ t.test(ratio ~ cell_type, data=reaper_results_tall, paired = TRUE, alternative =
 reaper_results_tall <- compiled_results_df[c(1,13,14)] %>% pivot_longer(cols = 2:3, names_to = 'cell_type', values_to = 'ratio')
 reaper_results_tall <- reaper_results_tall %>% mutate(reap_type = case_when(cell_type == 'reaped_ratio' ~ "reaped",
                                                                             cell_type == 'touched_not_mac_dying_ratio' ~ 'not reaped'))
-reaper_results_tall <- reaper_results_tall %>% mutate(cell_type = case_when(grepl('atdc5_oc', sample) ~ 'ATDC5_coculture',
+reaper_results_tall <- reaper_results_tall %>% mutate(cell_type = case_when(grepl('TW1_atdc5_oc', sample) ~ 'ATDC5_transwell_coculture',
+                                                                            grepl('atdc5_oc', sample) ~ 'ATDC5_coculture',
                                                                             grepl('callus_oc', sample) ~ 'Callus_coculture',
+                                                                            grepl('TW1_atdc5', sample) ~ 'ATDC5_transwell',
                                                                             grepl('atdc5', sample) ~ 'ATDC5',
                                                                             grepl('callus_oc', sample) ~ 'Osteoclasts_coculture',
                                                                             grepl('atdc5_oc', sample) ~ 'Osteoclasts_coculture',
@@ -584,7 +593,7 @@ reaper_results_tall <- reaper_results_tall %>% mutate(cell_type = case_when(grep
                                                                             TRUE ~ 'Other'))
 
 
-reaper_results_tall$cell_type <- factor(reaper_results_tall$cell_type, levels=c('Osteoclasts', 'ATDC5', 'ATDC5_coculture', 'Callus_coculture'))
+reaper_results_tall$cell_type <- factor(reaper_results_tall$cell_type, levels=c('Osteoclasts', 'ATDC5', 'ATDC5_coculture', 'Callus_coculture', 'ATDC5_transwell_coculture', 'ATDC5_transwell'))
 
 ggplot(data=reaper_results_tall, aes(cell_type, ratio*100, alpha=reap_type, fill=cell_type)) +
   geom_bar(position='dodge', stat = "summary", fun = "mean") +
