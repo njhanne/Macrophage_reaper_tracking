@@ -305,6 +305,12 @@ for (sample_num in 1:length(unique(df_childless$id_col))) {
   compiled_confluence_df[sample_num, "avg_cell_num"] <- mean(match$avg_cell_count)
 }
 
+# clean up false macrophages
+df_childless <- df_childless %>% mutate(first_mac_touch = case_when(str_detect(id_col, 'TW1_') ~ NA, TRUE ~ first_mac_touch))
+df_childless <- df_childless %>% mutate(reaper_time = case_when(str_detect(id_col, 'TW1_') ~ NA, TRUE ~ reaper_time))
+df_childless <- df_childless %>% mutate(reaper_time = case_when(str_detect(id_col, 'TW1_') ~ NA, TRUE ~ reaper_time))
+
+
 ### does touching make them die?
 compiled_results_df <- data.frame(sample = unique(df_childless$id_col), total_cells = NA, total_dying = NA, dying_ratio = NA,
                                   total_mac = NA, mac_ratio = NA, touched_mac = NA, 
@@ -418,114 +424,115 @@ compiled_results_df <- left_join(compiled_results_df, compiled_confluence_df)
 pal <- c('#cc3311', '#bbbbbb', '#ee7733', '#0077bb', '#33bbee', '#cc3311')
 
 
-# test different confluence calcs
-ggplot(data=compiled_results_df, aes(x = total_cells, y = avg_cell_num)) +
-  geom_point() + geom_smooth(method=lm, se=FALSE, fullrange=FALSE)
-
-ggplot(data=compiled_results_df, aes(x = total_cells, y = cell_area)) +
-  geom_point() + geom_smooth(method=lm, se=FALSE, fullrange=FALSE)
-
-ggplot(data=compiled_results_df, aes(x = avg_cell_num, y = cell_area)) +
-  geom_point() + geom_smooth(method=lm, se=FALSE, fullrange=FALSE)
-
-
-### Probabilities / Bayes
-# we can see if the probabilities are 'independent' if they multiply together
-# independent if P(mactouch and death) = P(mactouch)*P(death)
-compiled_results_df$reaped_independence <- (compiled_results_df$touched_mac / compiled_results_df$total_cells)*(compiled_results_df$total_dying / compiled_results_df$total_cells)
-compiled_results_df$reap_prob <- compiled_results_df$total_reaped / compiled_results_df$total_cells
-
-compiled_results_tall <- compiled_results_df %>% select(sample, cell_type, reap_prob, reaped_independence) 
-compiled_results_tall <- compiled_results_tall %>% pivot_longer(-c(cell_type, sample), names_to = "prob_type", values_to = "probability")
-compiled_results_tall$cell_type <- factor(compiled_results_tall$cell_type)
-
-
-ggplot(data=compiled_results_tall, aes(cell_type, probability, alpha=prob_type, fill=cell_type)) +
-  geom_bar(position='dodge', stat = "summary", fun = "mean") +
-  geom_jitter(position = position_jitterdodge(0.1)) +
-  ylab('probability') +
-  scale_fill_manual(values=pal) +
-  scale_alpha_manual(values=c(.66, 1))
-
-for (group_i in 1:length(levels(compiled_results_tall$cell_type))) {
-  temp_df <- compiled_results_tall %>% filter(cell_type == levels(compiled_results_tall$cell_type)[group_i])
-  print(levels(compiled_results_tall$cell_type)[group_i])
-  print(t.test(probability ~ prob_type, data=temp_df, paired = TRUE, alternative = "two.sided"))
-}
-# the atdc5 coculture appears to be independent...
-
-
-# P(death given observed mactouch) = x = P(death) * P(observed death after mactouch) / P(mactouch)
-# P(mactouch and notdeath) = y
-# P(nomactouch and death) = a = P(death) * P(observed death after not touching mac) / P(notmactouch)
-# P(nomactouch and notdeath) = b
-compiled_results_df$bayes_prob <- (compiled_results_df$total_dying / compiled_results_df$total_cells) * compiled_results_df$reap_prob / (compiled_results_df$touched_mac / compiled_results_df$total_cells)
-compiled_results_df$bayes_prob_no <- (compiled_results_df$total_dying / compiled_results_df$total_cells) * compiled_results_df$not_reaped_ratio / (compiled_results_df$not_touched_mac / compiled_results_df$total_cells)
-
-compiled_results_tall <- compiled_results_df %>% select(sample, cell_type, bayes_prob_no, bayes_prob) 
-compiled_results_tall <- compiled_results_tall %>% pivot_longer(-c(cell_type, sample), names_to = "prob_type", values_to = "probability")
-compiled_results_tall$cell_type <- factor(compiled_results_tall$cell_type)
-
-ggplot(data=compiled_results_tall, aes(cell_type, probability*100, alpha=prob_type, fill=cell_type)) +
-  geom_bar(position='dodge', stat = "summary", fun = "mean") +
-  geom_jitter(position = position_jitterdodge(0.1)) +
-  ylab('probability %') +
-  scale_fill_manual(values=pal) +
-  scale_alpha_manual(values=c(.66, 1))
-
-for (group_i in 2:length(levels(compiled_results_tall$cell_type))) {
-  temp_df <- compiled_results_tall %>% filter(cell_type == levels(compiled_results_tall$cell_type)[group_i])
-  print(levels(compiled_results_tall$cell_type)[group_i])
-  print(t.test(probability ~ prob_type, data=temp_df, paired = TRUE, alternative = "two.sided"))
-}
+# # test different confluence calcs
+# ggplot(data=compiled_results_df, aes(x = total_cells, y = avg_cell_num)) +
+#   geom_point() + geom_smooth(method=lm, se=FALSE, fullrange=FALSE)
+# 
+# ggplot(data=compiled_results_df, aes(x = total_cells, y = cell_area)) +
+#   geom_point() + geom_smooth(method=lm, se=FALSE, fullrange=FALSE)
+# 
+# ggplot(data=compiled_results_df, aes(x = avg_cell_num, y = cell_area)) +
+#   geom_point() + geom_smooth(method=lm, se=FALSE, fullrange=FALSE)
+# 
+# 
+# ### Probabilities / Bayes
+# # we can see if the probabilities are 'independent' if they multiply together
+# # independent if P(mactouch and death) = P(mactouch)*P(death)
+# compiled_results_df$reaped_independence <- (compiled_results_df$touched_mac / compiled_results_df$total_cells)*(compiled_results_df$total_dying / compiled_results_df$total_cells)
+# compiled_results_df$reap_prob <- compiled_results_df$total_reaped / compiled_results_df$total_cells
+# 
+# compiled_results_tall <- compiled_results_df %>% select(sample, cell_type, reap_prob, reaped_independence) 
+# compiled_results_tall <- compiled_results_tall %>% pivot_longer(-c(cell_type, sample), names_to = "prob_type", values_to = "probability")
+# compiled_results_tall$cell_type <- factor(compiled_results_tall$cell_type)
+# 
+# 
+# ggplot(data=compiled_results_tall, aes(cell_type, probability, alpha=prob_type, fill=cell_type)) +
+#   geom_bar(position='dodge', stat = "summary", fun = "mean") +
+#   geom_jitter(position = position_jitterdodge(0.1)) +
+#   ylab('probability') +
+#   scale_fill_manual(values=pal) +
+#   scale_alpha_manual(values=c(.66, 1))
+# 
+# for (group_i in 1:length(levels(compiled_results_tall$cell_type))) {
+#   temp_df <- compiled_results_tall %>% filter(cell_type == levels(compiled_results_tall$cell_type)[group_i])
+#   print(levels(compiled_results_tall$cell_type)[group_i])
+#   print(t.test(probability ~ prob_type, data=temp_df, paired = TRUE, alternative = "two.sided"))
+# }
+# # the atdc5 coculture appears to be independent...
+# 
+# 
+# # P(death given observed mactouch) = x = P(death) * P(observed death after mactouch) / P(mactouch)
+# # P(mactouch and notdeath) = y
+# # P(nomactouch and death) = a = P(death) * P(observed death after not touching mac) / P(notmactouch)
+# # P(nomactouch and notdeath) = b
+# compiled_results_df$bayes_prob <- (compiled_results_df$total_dying / compiled_results_df$total_cells) * compiled_results_df$reap_prob / (compiled_results_df$touched_mac / compiled_results_df$total_cells)
+# compiled_results_df$bayes_prob_no <- (compiled_results_df$total_dying / compiled_results_df$total_cells) * compiled_results_df$not_reaped_ratio / (compiled_results_df$not_touched_mac / compiled_results_df$total_cells)
+# 
+# compiled_results_tall <- compiled_results_df %>% select(sample, cell_type, bayes_prob_no, bayes_prob) 
+# compiled_results_tall <- compiled_results_tall %>% pivot_longer(-c(cell_type, sample), names_to = "prob_type", values_to = "probability")
+# compiled_results_tall$cell_type <- factor(compiled_results_tall$cell_type)
+# 
+# ggplot(data=compiled_results_tall, aes(cell_type, probability*100, alpha=prob_type, fill=cell_type)) +
+#   geom_bar(position='dodge', stat = "summary", fun = "mean") +
+#   geom_jitter(position = position_jitterdodge(0.1)) +
+#   ylab('probability %') +
+#   scale_fill_manual(values=pal) +
+#   scale_alpha_manual(values=c(.66, 1))
+# 
+# for (group_i in 2:length(levels(compiled_results_tall$cell_type))) {
+#   temp_df <- compiled_results_tall %>% filter(cell_type == levels(compiled_results_tall$cell_type)[group_i])
+#   print(levels(compiled_results_tall$cell_type)[group_i])
+#   print(t.test(probability ~ prob_type, data=temp_df, paired = TRUE, alternative = "two.sided"))
+# }
 # bayesian says touching macrophage does increase risk of dying (except in monoculture)
 
 
 
-### cell touching analysis
-# cell type
-compiled_results_tall <- rbind(compiled_tall_results_mac, compiled_tall_results_notmac)
-compiled_results_tall <- left_join(compiled_results_tall, compiled_results_df[c(1,2,20,21)])
-compiled_results_tall <- compiled_results_tall %>% mutate(cell_type = case_when(cell_type == 'chondrocytes' & grepl('TW1_atdc5_oc', sample) ~ 'ATDC5_transwell_coculture',
-                                                                                    cell_type == 'chondrocytes' & grepl('atdc5_oc', sample) ~ 'ATDC5_coculture',
-                                                                                    cell_type == 'chondrocytes' & grepl('callus_oc', sample) ~ 'Callus_coculture',
-                                                                                    cell_type == 'chondrocytes' & grepl('TW1_atdc5', sample) ~ 'ATDC5_transwell',
-                                                                                    cell_type == 'chondrocytes' & grepl('atdc5', sample) ~ 'ATDC5',
-                                                                                    cell_type == 'osteoclasts' & grepl('callus_oc', sample) ~ 'Osteoclasts_coculture',
-                                                                                    cell_type == 'osteoclasts' & grepl('TW1_atdc5_oc', sample) ~ 'Osteoclasts_transwell_coculture',
-                                                                                    cell_type == 'osteoclasts' & grepl('TW1_atdc5', sample) ~ 'Osteoclasts_transwell_mono',
-                                                                                    cell_type == 'osteoclasts' & grepl('atdc5_oc', sample) ~ 'Osteoclasts_coculture',
-                                                                                    cell_type == 'osteoclasts' ~ 'Osteoclasts',
-                                                                                    TRUE ~ 'Other'))
-
-compiled_results_taller <- compiled_results_tall %>% pivot_longer(.,-c(total_touches, cell_type, sample, cell_area, total_cells, avg_cell_num), names_to = "touch_type", values_to = "touches")
-
-
-
-ggplot(data=compiled_results_taller, aes(x = total_cells, y = touches, shape = cell_type, color = touch_type, linetype=cell_type)) +
-  geom_point() + geom_smooth(method=lm, se=FALSE, fullrange=FALSE) + ylab('touch events per cell')
-
-
-ggplot(data = compiled_results_taller, aes(x = cell_type, y = touches, fill = touch_type))+
-  geom_bar(stat = "summary", fun = "mean") + ylab('touch events per cell')
-
-
-# touching for dying vs not dying
-dying_results_tall <- rbind(compiled_tall_results_dying, compiled_tall_results_notdying)
-dying_results_tall <- inner_join(dying_results_tall, compiled_results_df[c(1,2,20,21)])
-
-dying_results_taller <- dying_results_tall %>% pivot_longer(.,-c(total_touches, cell_type, sample, total_cells, cell_area, avg_cell_num), names_to = "touch_type", values_to = "touches")
-
-ggplot(data=dying_results_taller, aes(x = total_cells, y = touches, shape = cell_type, color = touch_type)) +
-  geom_point() + geom_smooth(method=lm, se=FALSE, fullrange=TRUE) + ylab('touch events per cell')
-
-ggplot(data = dying_results_taller, aes(x = cell_type, y = touches, fill = touch_type))+
-  geom_bar(stat = "summary", fun = "mean", position='fill') + ylab('relative touch events per cell')
+# ### cell touching analysis
+# # cell type
+# compiled_results_tall <- rbind(compiled_tall_results_mac, compiled_tall_results_notmac)
+# compiled_results_tall <- left_join(compiled_results_tall, compiled_results_df[c(1,2,20,21)])
+# compiled_results_tall <- compiled_results_tall %>% mutate(cell_type = case_when(cell_type == 'chondrocytes' & grepl('TW1_atdc5_oc', sample) ~ 'ATDC5_transwell_coculture',
+#                                                                                     cell_type == 'chondrocytes' & grepl('atdc5_oc', sample) ~ 'ATDC5_coculture',
+#                                                                                     cell_type == 'chondrocytes' & grepl('callus_oc', sample) ~ 'Callus_coculture',
+#                                                                                     cell_type == 'chondrocytes' & grepl('TW1_atdc5', sample) ~ 'ATDC5_transwell',
+#                                                                                     cell_type == 'chondrocytes' & grepl('atdc5', sample) ~ 'ATDC5',
+#                                                                                     cell_type == 'osteoclasts' & grepl('callus_oc', sample) ~ 'Osteoclasts_coculture',
+#                                                                                     cell_type == 'osteoclasts' & grepl('TW1_atdc5_oc', sample) ~ 'Osteoclasts_transwell_coculture',
+#                                                                                     cell_type == 'osteoclasts' & grepl('TW1_atdc5', sample) ~ 'Osteoclasts_transwell_mono',
+#                                                                                     cell_type == 'osteoclasts' & grepl('atdc5_oc', sample) ~ 'Osteoclasts_coculture',
+#                                                                                     cell_type == 'osteoclasts' ~ 'Osteoclasts',
+#                                                                                     TRUE ~ 'Other'))
+# 
+# compiled_results_taller <- compiled_results_tall %>% pivot_longer(.,-c(total_touches, cell_type, sample, cell_area, total_cells, avg_cell_num), names_to = "touch_type", values_to = "touches")
+# 
+# 
+# 
+# ggplot(data=compiled_results_taller, aes(x = total_cells, y = touches, shape = cell_type, color = touch_type, linetype=cell_type)) +
+#   geom_point() + geom_smooth(method=lm, se=FALSE, fullrange=FALSE) + ylab('touch events per cell')
+# 
+# 
+# ggplot(data = compiled_results_taller, aes(x = cell_type, y = touches, fill = touch_type))+
+#   geom_bar(stat = "summary", fun = "mean") + ylab('touch events per cell')
+# 
+# 
+# # touching for dying vs not dying
+# dying_results_tall <- rbind(compiled_tall_results_dying, compiled_tall_results_notdying)
+# dying_results_tall <- inner_join(dying_results_tall, compiled_results_df[c(1,2,20,21)])
+# 
+# dying_results_taller <- dying_results_tall %>% pivot_longer(.,-c(total_touches, cell_type, sample, total_cells, cell_area, avg_cell_num), names_to = "touch_type", values_to = "touches")
+# 
+# ggplot(data=dying_results_taller, aes(x = total_cells, y = touches, shape = cell_type, color = touch_type)) +
+#   geom_point() + geom_smooth(method=lm, se=FALSE, fullrange=TRUE) + ylab('touch events per cell')
+# 
+# ggplot(data = dying_results_taller, aes(x = cell_type, y = touches, fill = touch_type))+
+#   geom_bar(stat = "summary", fun = "mean", position='fill') + ylab('relative touch events per cell')
 
 
 
 ### Death analysis
 # dying ratio by cell
+# these two are used
 compiled_results_df$cell_type <- factor(compiled_results_df$cell_type, levels=c('Osteoclasts', 'ATDC5', 'ATDC5_coculture', 'Callus_coculture', 'transwell_coculture', 'transwell_ATDC5'))
 
 ggplot(data=compiled_results_df, aes(x=cell_type, y = dying_ratio*100, fill = cell_type)) +
@@ -544,6 +551,9 @@ ggplot(data=compiled_results_df, aes(x = total_cells, y = dying_ratio*100, color
 death_by_culture <- aov(dying_ratio~cell_type, data=compiled_results_df)
 summary(death_by_culture)
 TukeyHSD(death_by_culture)
+
+
+
 
 # reaped vs not reaped
 reaped_results_tall <- rbind(compiled_tall_results_reaped, compiled_tall_results_notreaped)
@@ -612,6 +622,8 @@ test <- reaper_results_tall %>% group_by(cell_type, reap_type) %>% dplyr::summar
 
 
 
+
+
 #TODO relook at what this is
 touch_results_tall <- compiled_results_df[c(1,14,18)] %>% pivot_longer(cols = 2:3, names_to = 'cell_type', values_to = 'avg_touches')
 touch_results_tall <- touch_results_tall %>% mutate(cell_type = case_when(cell_type == 'reaped_ratio' ~ "macrophage",
@@ -642,6 +654,15 @@ cell_reaper_probs$notmac_reaper_ratio <- cell_reaper_probs$notmac_reap_count / c
 for (i in 1:nrow(cell_reaper_probs)) {
   # fix atdc5 mono
   if (grepl('atdc5', cell_reaper_probs[i, 'id_col']) & !grepl('atdc5_oc', cell_reaper_probs[i, 'id_col'])) {
+    cell_reaper_probs[i, 'mac_reap_count'] <-  cell_reaper_probs[i, 'notmac_reap_count'] +  cell_reaper_probs[i, 'mac_reap_count']
+    cell_reaper_probs[i, 'notmac_reap_count'] <- 0
+    cell_reaper_probs[i, 'mac_touch_count'] <-  cell_reaper_probs[i, 'notmac_touch_count'] +  cell_reaper_probs[i, 'mac_touch_count']
+    cell_reaper_probs[i, 'notmac_touch_count'] <- 0
+    cell_reaper_probs[i, 'mac_reaper_ratio'] <- cell_reaper_probs[i, 'mac_reap_count'] / cell_reaper_probs[i, 'mac_touch_count']
+    cell_reaper_probs[i, 'notmac_reaper_ratio'] <- 0
+  }
+  # fix OC mono
+  else if (grepl('oc', cell_reaper_probs[i, 'id_col']) & !(grepl('atdc5_oc', cell_reaper_probs[i, 'id_col']) | grepl('callus_oc', cell_reaper_probs[i, 'id_col']))) {
     cell_reaper_probs[i, 'notmac_reap_count'] <-  cell_reaper_probs[i, 'notmac_reap_count'] +  cell_reaper_probs[i, 'mac_reap_count']
     cell_reaper_probs[i, 'mac_reap_count'] <- 0
     cell_reaper_probs[i, 'notmac_touch_count'] <-  cell_reaper_probs[i, 'notmac_touch_count'] +  cell_reaper_probs[i, 'mac_touch_count']
@@ -649,8 +670,8 @@ for (i in 1:nrow(cell_reaper_probs)) {
     cell_reaper_probs[i, 'notmac_reaper_ratio'] <- cell_reaper_probs[i, 'notmac_reap_count'] / cell_reaper_probs[i, 'notmac_touch_count']
     cell_reaper_probs[i, 'mac_reaper_ratio'] <- 0
   }
-  # fix OC mono
-  else if (grepl('oc', cell_reaper_probs[i, 'id_col']) & !(grepl('atdc5_oc', cell_reaper_probs[i, 'id_col']) | grepl('callus_oc', cell_reaper_probs[i, 'id_col']))) {
+  # fix transwell
+  else if (grepl('TW1_', cell_reaper_probs[i, 'id_col'])) {
     cell_reaper_probs[i, 'mac_reap_count'] <-  cell_reaper_probs[i, 'notmac_reap_count'] +  cell_reaper_probs[i, 'mac_reap_count']
     cell_reaper_probs[i, 'notmac_reap_count'] <- 0
     cell_reaper_probs[i, 'mac_touch_count'] <-  cell_reaper_probs[i, 'notmac_touch_count'] +  cell_reaper_probs[i, 'mac_touch_count']
@@ -663,18 +684,22 @@ for (i in 1:nrow(cell_reaper_probs)) {
 
 cell_reaper_probs_tall <- cell_reaper_probs[c(1,6,7)] %>% pivot_longer(cols = 2:3, names_to = 'reap_type', values_to = 'reaper_prob')
 
-cell_reaper_probs_tall <- cell_reaper_probs_tall %>% mutate(cell_type = case_when(reap_type == 'mac_reaper_ratio' & grepl('atdc5_oc', id_col) ~ 'ATDC5_coculture',
-                                                                                          reap_type == 'mac_reaper_ratio' & grepl('atdc5', id_col) ~ 'ATDC5',
-                                                                                          reap_type == 'mac_reaper_ratio' & grepl('callus_oc', id_col) ~ 'Callus_coculture',
-                                                                                          reap_type == 'mac_reaper_ratio' & grepl('oc', id_col) ~ 'Osteoclasts',
-                                                                                          reap_type == 'notmac_reaper_ratio' & grepl('atdc5_oc', id_col) ~ 'ATDC5_coculture',
-                                                                                          reap_type == 'notmac_reaper_ratio' & grepl('atdc5', id_col) ~ 'ATDC5',
-                                                                                          reap_type == 'notmac_reaper_ratio' & grepl('callus_oc', id_col) ~ 'Callus_coculture',
-                                                                                          reap_type == 'notmac_reaper_ratio' & grepl('oc', id_col) ~ 'Osteoclasts',
-                                                                                          TRUE ~ 'Other'))
+cell_reaper_probs_tall <- cell_reaper_probs_tall %>% mutate(cell_type = case_when(reap_type == 'mac_reaper_ratio' & grepl('TW1_atdc5_oc', id_col) ~ 'ATDC5_transwell_coculture',
+                                                                                  reap_type == 'mac_reaper_ratio' & grepl('atdc5_oc', id_col) ~ 'ATDC5_coculture',
+                                                                                  reap_type == 'mac_reaper_ratio' & grepl('TW1_atdc5', id_col) ~ 'ATDC5_transwell',
+                                                                                  reap_type == 'mac_reaper_ratio' & grepl('atdc5', id_col) ~ 'ATDC5',
+                                                                                  reap_type == 'mac_reaper_ratio' & grepl('callus_oc', id_col) ~ 'Callus_coculture',
+                                                                                  reap_type == 'mac_reaper_ratio' & grepl('oc', id_col) ~ 'Osteoclasts',
+                                                                                  reap_type == 'notmac_reaper_ratio' & grepl('TW1_atdc5_oc', id_col) ~ 'ATDC5_transwell_coculture',
+                                                                                  reap_type == 'notmac_reaper_ratio' & grepl('atdc5_oc', id_col) ~ 'ATDC5_coculture',
+                                                                                  reap_type == 'notmac_reaper_ratio' & grepl('TW1_atdc5', id_col) ~ 'ATDC5_transwell',
+                                                                                  reap_type == 'notmac_reaper_ratio' & grepl('atdc5', id_col) ~ 'ATDC5',
+                                                                                  reap_type == 'notmac_reaper_ratio' & grepl('callus_oc', id_col) ~ 'Callus_coculture',
+                                                                                  reap_type == 'notmac_reaper_ratio' & grepl('oc', id_col) ~ 'Osteoclasts',
+                                                                                  TRUE ~ 'Other'))
 
 
-cell_reaper_probs_tall$cell_type <- factor(cell_reaper_probs_tall$cell_type, levels=c('Osteoclasts', 'ATDC5', 'ATDC5_coculture', 'Callus_coculture'))
+cell_reaper_probs_tall$cell_type <- factor(cell_reaper_probs_tall$cell_type, levels=c('Osteoclasts', 'ATDC5', 'ATDC5_coculture', 'Callus_coculture', 'ATDC5_transwell_coculture', 'ATDC5_transwell'))
 cell_reaper_probs_tall$reap_type <- factor(cell_reaper_probs_tall$reap_type)
 levels(cell_reaper_probs_tall$reap_type) <- c('Not OC Reaper', 'Osteoclast Reaper')
 
@@ -704,73 +729,73 @@ for (group_i in 1:length(levels(cell_reaper_probs_tall$cell_type))) {
 
 
 
-# histograms
-df_childless$mac_t_diff <- apply(df_childless, 1, function(x) {x['mac_touch_frames'][[1]] - x['first_apoptosis'][[1]]})
-df_childless$notmac_t_diff <- apply(df_childless, 1, function(x) {x['notmac_touch_frames'][[1]] - x['first_apoptosis'][[1]]})
-df_childless$notmac_touch_count <- apply(df_childless, 1, function(x) {length(x['notmac_touch_frames'][[1]])})
-df_childless$mac_touch_count <- apply(df_childless, 1, function(x) {length(x['mac_touch_frames'][[1]])})
-
-# test2 <- df_childless[df_childless$id_col == unique(df_childless$id_col)[5],]
-# test2 <- test2 %>% filter(!is.na(first_apoptosis)) %>% select(first_apoptosis, mac_touch_frames, notmac_touch_frames)
-
-dying_childless <- df_childless %>% filter(!is.na(first_apoptosis)) %>% select(id_col, mac_touch_frames, notmac_touch_frames, mac_t_diff, notmac_t_diff, mac_touch_count, notmac_touch_count)
-dying_childless$med_neg_mac_t_diff <- apply(dying_childless, 1, function(x) { median(x['mac_t_diff'][[1]][x['mac_t_diff'][[1]] < 0]) })
-dying_childless$mean_neg_mac_t_diff <- apply(dying_childless, 1, function(x) { mean(x['mac_t_diff'][[1]][x['mac_t_diff'][[1]] < 0]) })
-dying_childless$med_neg_notmac_t_diff <- apply(dying_childless, 1, function(x) { median(x['notmac_t_diff'][[1]][x['notmac_t_diff'][[1]] < 0]) })
-dying_childless$mean_neg_notmac_t_diff <- apply(dying_childless, 1, function(x) { mean(x['notmac_t_diff'][[1]][x['notmac_t_diff'][[1]] < 0]) })
-
-avg_touch_t_tall <- dying_childless[c(1,10,11)] %>% pivot_longer(cols = 2:3, names_to = 'cell_type', values_to = 'avg_touch_t') # mean, not median
-
-ggplot(avg_touch_t_tall) + geom_boxplot(aes(avg_touch_t*8/60, id_col, color = cell_type))
- ggplot() + geom_boxplot(data=avg_touch_t_tall, aes(avg_touch_t*8/60, cell_type))
-
-
-tall_test <- data.frame()
-mac_list <- list()
-notmac_list <- list()
-for (r in 1:nrow(dying_childless)) {
-  if (!is.null(dying_childless[r,'mac_touch_frames'][[1]][[1]]) & length(dying_childless[r,'mac_touch_frames'][[1]][[1]]) != 0) {
-    temp_mac <- as.data.frame(append(enframe(unlist(dying_childless[r,'mac_t_diff'][[1]]))[,2],
-                                      c(dying_childless[r,'mac_touch_count'], dying_childless[r,'mac_touch_count']+dying_childless[r, 'notmac_touch_count'], dying_childless[r, 'id_col'])))
-    mac_list <- append(mac_list, list(temp_mac))
-  }
-  if (!is.null(dying_childless[r,'notmac_touch_frames'][[1]][[1]]) & length(dying_childless[r,'notmac_touch_frames'][[1]][[1]]) != 0) {
-    temp_notmac <- as.data.frame(append(enframe(unlist(dying_childless[r,'notmac_t_diff'][[1]]))[,2],
-                                     c(dying_childless[r,'notmac_touch_count'], dying_childless[r,'mac_touch_count']+dying_childless[r, 'notmac_touch_count'], dying_childless[r, 'id_col'])))
-    notmac_list <- append(notmac_list, list(temp_notmac))
-  }
-}
-mac_touch_test <- rbindlist(mac_list)
-notmac_touch_test <- rbindlist(notmac_list)
-
-for (sample in 1:length(unique(dying_childless$id_col))) {
-  histo_plot <- ggplot() + geom_histogram(data=mac_touch_test[mac_touch_test$id_col == unique(dying_childless$id_col)[sample]], aes(x=value/(60/8), y=..density.., weight = 1/mac_touch_count), binwidth = 0.5, alpha=0.5, fill='red') + 
-             geom_density(data=mac_touch_test[mac_touch_test$id_col == unique(dying_childless$id_col)[sample]], aes(x=value/(60/8), y=..density.., weight = 1/mac_touch_count), color='red') +
-             geom_histogram(data=notmac_touch_test[notmac_touch_test$id_col == unique(dying_childless$id_col)[sample]], aes(x=value/(60/8), y=..density.., weight = 1/notmac_touch_count), binwidth = 0.5, alpha=0.5, fill='black') + 
-             geom_density(data=notmac_touch_test[notmac_touch_test$id_col == unique(dying_childless$id_col)[sample]], aes(x=value/(60/8), y=..density.., weight = 1/notmac_touch_count))
-  pdf(paste0("../figures/histogram_", as.character(unique(dying_childless$id_col)[sample]), "_mac_and_notmac.pdf"), width=8, height=5)
-  plot(histo_plot)
-  dev.off()
-}
-
-# setup the weighting for the combined histogram
-mac_grand_sum <- sum(mac_touch_test$mac_touch_count)
-mac_sample_sum <- mac_touch_test %>% group_by(id_col) %>% summarise(sample_sum = sum(mac_touch_count))
-mac_sample_sum$relative_weight <- mac_sample_sum$sample_sum / mac_grand_sum
-mac_touch_test <- left_join(mac_touch_test, mac_sample_sum)
-notmac_grand_sum <- sum(notmac_touch_test$notmac_touch_count)
-notmac_sample_sum <- notmac_touch_test %>% group_by(id_col) %>% summarise(sample_sum = sum(notmac_touch_count))
-notmac_sample_sum$relative_weight <- notmac_sample_sum$sample_sum / notmac_grand_sum
-notmac_touch_test <- left_join(notmac_touch_test, notmac_sample_sum)
-
-# plot combined histogram
-histo_plot <- ggplot() + geom_histogram(data=mac_touch_test, aes(x=value/(60/8), y=..density.., weight = relative_weight/mac_touch_count), binwidth = 0.5, alpha=0, fill='red') + 
-  geom_density(data=mac_touch_test, aes(x=value/(60/8), y=..density.., weight = relative_weight/mac_touch_count), color='red') +
-  geom_histogram(data=notmac_touch_test[notmac_touch_test$id_col == unique(dying_childless$id_col)[sample]], aes(x=value/(60/8), y=..density.., weight = relative_weight/notmac_touch_count), binwidth = 0.5, alpha=0, fill='black') + 
-  geom_density(data=notmac_touch_test[notmac_touch_test$id_col == unique(dying_childless$id_col)[sample]], aes(x=value/(60/8), y=..density.., weight = relative_weight/notmac_touch_count))
-pdf(paste0("../figures/histogram_E2_atdc5_oc_combined_mac_and_notmac.pdf"), width=8, height=5)
-plot(histo_plot)
-dev.off()
-
-
-# idea https://r-graph-gallery.com/322-custom-colours-in-sankey-diagram.html
+# # histograms
+# df_childless$mac_t_diff <- apply(df_childless, 1, function(x) {x['mac_touch_frames'][[1]] - x['first_apoptosis'][[1]]})
+# df_childless$notmac_t_diff <- apply(df_childless, 1, function(x) {x['notmac_touch_frames'][[1]] - x['first_apoptosis'][[1]]})
+# df_childless$notmac_touch_count <- apply(df_childless, 1, function(x) {length(x['notmac_touch_frames'][[1]])})
+# df_childless$mac_touch_count <- apply(df_childless, 1, function(x) {length(x['mac_touch_frames'][[1]])})
+# 
+# # test2 <- df_childless[df_childless$id_col == unique(df_childless$id_col)[5],]
+# # test2 <- test2 %>% filter(!is.na(first_apoptosis)) %>% select(first_apoptosis, mac_touch_frames, notmac_touch_frames)
+# 
+# dying_childless <- df_childless %>% filter(!is.na(first_apoptosis)) %>% select(id_col, mac_touch_frames, notmac_touch_frames, mac_t_diff, notmac_t_diff, mac_touch_count, notmac_touch_count)
+# dying_childless$med_neg_mac_t_diff <- apply(dying_childless, 1, function(x) { median(x['mac_t_diff'][[1]][x['mac_t_diff'][[1]] < 0]) })
+# dying_childless$mean_neg_mac_t_diff <- apply(dying_childless, 1, function(x) { mean(x['mac_t_diff'][[1]][x['mac_t_diff'][[1]] < 0]) })
+# dying_childless$med_neg_notmac_t_diff <- apply(dying_childless, 1, function(x) { median(x['notmac_t_diff'][[1]][x['notmac_t_diff'][[1]] < 0]) })
+# dying_childless$mean_neg_notmac_t_diff <- apply(dying_childless, 1, function(x) { mean(x['notmac_t_diff'][[1]][x['notmac_t_diff'][[1]] < 0]) })
+# 
+# avg_touch_t_tall <- dying_childless[c(1,10,11)] %>% pivot_longer(cols = 2:3, names_to = 'cell_type', values_to = 'avg_touch_t') # mean, not median
+# 
+# ggplot(avg_touch_t_tall) + geom_boxplot(aes(avg_touch_t*8/60, id_col, color = cell_type))
+#  ggplot() + geom_boxplot(data=avg_touch_t_tall, aes(avg_touch_t*8/60, cell_type))
+# 
+# 
+# tall_test <- data.frame()
+# mac_list <- list()
+# notmac_list <- list()
+# for (r in 1:nrow(dying_childless)) {
+#   if (!is.null(dying_childless[r,'mac_touch_frames'][[1]][[1]]) & length(dying_childless[r,'mac_touch_frames'][[1]][[1]]) != 0) {
+#     temp_mac <- as.data.frame(append(enframe(unlist(dying_childless[r,'mac_t_diff'][[1]]))[,2],
+#                                       c(dying_childless[r,'mac_touch_count'], dying_childless[r,'mac_touch_count']+dying_childless[r, 'notmac_touch_count'], dying_childless[r, 'id_col'])))
+#     mac_list <- append(mac_list, list(temp_mac))
+#   }
+#   if (!is.null(dying_childless[r,'notmac_touch_frames'][[1]][[1]]) & length(dying_childless[r,'notmac_touch_frames'][[1]][[1]]) != 0) {
+#     temp_notmac <- as.data.frame(append(enframe(unlist(dying_childless[r,'notmac_t_diff'][[1]]))[,2],
+#                                      c(dying_childless[r,'notmac_touch_count'], dying_childless[r,'mac_touch_count']+dying_childless[r, 'notmac_touch_count'], dying_childless[r, 'id_col'])))
+#     notmac_list <- append(notmac_list, list(temp_notmac))
+#   }
+# }
+# mac_touch_test <- rbindlist(mac_list)
+# notmac_touch_test <- rbindlist(notmac_list)
+# 
+# for (sample in 1:length(unique(dying_childless$id_col))) {
+#   histo_plot <- ggplot() + geom_histogram(data=mac_touch_test[mac_touch_test$id_col == unique(dying_childless$id_col)[sample]], aes(x=value/(60/8), y=..density.., weight = 1/mac_touch_count), binwidth = 0.5, alpha=0.5, fill='red') + 
+#              geom_density(data=mac_touch_test[mac_touch_test$id_col == unique(dying_childless$id_col)[sample]], aes(x=value/(60/8), y=..density.., weight = 1/mac_touch_count), color='red') +
+#              geom_histogram(data=notmac_touch_test[notmac_touch_test$id_col == unique(dying_childless$id_col)[sample]], aes(x=value/(60/8), y=..density.., weight = 1/notmac_touch_count), binwidth = 0.5, alpha=0.5, fill='black') + 
+#              geom_density(data=notmac_touch_test[notmac_touch_test$id_col == unique(dying_childless$id_col)[sample]], aes(x=value/(60/8), y=..density.., weight = 1/notmac_touch_count))
+#   pdf(paste0("../figures/histogram_", as.character(unique(dying_childless$id_col)[sample]), "_mac_and_notmac.pdf"), width=8, height=5)
+#   plot(histo_plot)
+#   dev.off()
+# }
+# 
+# # setup the weighting for the combined histogram
+# mac_grand_sum <- sum(mac_touch_test$mac_touch_count)
+# mac_sample_sum <- mac_touch_test %>% group_by(id_col) %>% summarise(sample_sum = sum(mac_touch_count))
+# mac_sample_sum$relative_weight <- mac_sample_sum$sample_sum / mac_grand_sum
+# mac_touch_test <- left_join(mac_touch_test, mac_sample_sum)
+# notmac_grand_sum <- sum(notmac_touch_test$notmac_touch_count)
+# notmac_sample_sum <- notmac_touch_test %>% group_by(id_col) %>% summarise(sample_sum = sum(notmac_touch_count))
+# notmac_sample_sum$relative_weight <- notmac_sample_sum$sample_sum / notmac_grand_sum
+# notmac_touch_test <- left_join(notmac_touch_test, notmac_sample_sum)
+# 
+# # plot combined histogram
+# histo_plot <- ggplot() + geom_histogram(data=mac_touch_test, aes(x=value/(60/8), y=..density.., weight = relative_weight/mac_touch_count), binwidth = 0.5, alpha=0, fill='red') + 
+#   geom_density(data=mac_touch_test, aes(x=value/(60/8), y=..density.., weight = relative_weight/mac_touch_count), color='red') +
+#   geom_histogram(data=notmac_touch_test[notmac_touch_test$id_col == unique(dying_childless$id_col)[sample]], aes(x=value/(60/8), y=..density.., weight = relative_weight/notmac_touch_count), binwidth = 0.5, alpha=0, fill='black') + 
+#   geom_density(data=notmac_touch_test[notmac_touch_test$id_col == unique(dying_childless$id_col)[sample]], aes(x=value/(60/8), y=..density.., weight = relative_weight/notmac_touch_count))
+# pdf(paste0("../figures/histogram_E2_atdc5_oc_combined_mac_and_notmac.pdf"), width=8, height=5)
+# plot(histo_plot)
+# dev.off()
+# 
+# 
+# # idea https://r-graph-gallery.com/322-custom-colours-in-sankey-diagram.html

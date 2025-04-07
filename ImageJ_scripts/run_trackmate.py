@@ -29,6 +29,7 @@ from fiji.plugin.trackmate.cellpose import CellposeDetectorFactory
 import fiji.plugin.trackmate.features.FeatureFilter as FeatureFilter
 from fiji.plugin.trackmate.cellpose.CellposeSettings import PretrainedModel
 from fiji.plugin.trackmate.action import LabelImgExporter
+import fiji.plugin.trackmate.action.LabelImgExporter.LabelIdPainting as LabelIdPainting
 
 # We have to do the following to avoid errors with UTF8 chars generated in
 # TrackMate that will mess with our Fiji Jython.
@@ -63,7 +64,7 @@ channel_to_process = 3
 # directory_to_process = os.path.normpath("C:/Users/njhan/Box/macrophage_coculture/processed/stabilized_tiffs")
 directory_to_process = os.path.normpath("D:/UCSF/macrophage_video_analysis/processed/stabilized_tiffs/test")
 
-file_paths = find_all_filepaths(directory_to_process, '.tiff')
+file_paths = find_all_filepaths(directory_to_process, '.tif')
 print(file_paths)
 
 
@@ -98,8 +99,8 @@ def run(image_file):
   settings.detectorSettings['OPTIONAL_CHANNEL_2'] = 0
   settings.detectorSettings['CELLPOSE_PYTHON_FILEPATH'] = "C:/Users/njhan/anaconda3/envs/Branches/python.exe"
   settings.detectorSettings['CELLPOSE_MODEL'] = PretrainedModel.CUSTOM
-  settings.detectorSettings['CELLPOSE_MODEL_FILEPATH'] = "C:/Users/njhan/Box/macrophage_coculture/Cellpose_model/NH_LB_LC1_HL2"
-  settings.detectorSettings['CELL_DIAMETER'] = 42.0
+  settings.detectorSettings['CELLPOSE_MODEL_FILEPATH'] = "C:/Users/njhan/Box/macrophage_coculture/Cellpose_model/NH_LB_LC3_HL2"
+  settings.detectorSettings['CELL_DIAMETER'] = 52.0
   settings.detectorSettings['USE_GPU'] = True
   settings.detectorSettings['SIMPLIFY_CONTOURS'] = False
 
@@ -109,8 +110,8 @@ def run(image_file):
 
   settings.trackerSettings['LINKING_MAX_DISTANCE'] = 100.0
 
-  settings.trackerSettings['GAP_CLOSING_MAX_DISTANCE'] = 50.0
-  settings.trackerSettings['MAX_FRAME_GAP'] = 5
+  settings.trackerSettings['GAP_CLOSING_MAX_DISTANCE'] = 75.0
+  settings.trackerSettings['MAX_FRAME_GAP'] = 8
 
   settings.trackerSettings['ALLOW_TRACK_SPLITTING'] = True
   settings.trackerSettings['SPLITTING_MAX_DISTANCE'] = 50.0
@@ -176,7 +177,7 @@ def run(image_file):
   print("Results saved to: " + saveFile.toString() + '\n');
 
   lblImg = LabelImgExporter()
-  lblImg.createLabelImagePlus(trackmate, False, False, True, logger).show()
+  lblImg.createLabelImagePlus(trackmate, False, False, LabelIdPainting.LABEL_IS_SPOT_ID, logger).show()
   c = WindowManager.getCurrentImage()
   IJ.save(c, "D:/UCSF/macrophage_video_analysis/processed/label_images/" + c.getTitle())
   c.close()

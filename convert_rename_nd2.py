@@ -45,12 +45,12 @@ def adaptive_8bit(image, lut):
 ### MAIN ###
 # specify settings
 adaptive_thresh = False
-# rearrange = None
-rearrange = [1,2,0] # this is a little confusing, you put what channel from nd2 to be in 0,1,2 position
+rearrange = None
+# rearrange = [1,2,0] # this is a little confusing, you put what channel from nd2 to be in 0,1,2 position
 
 ## set directories for loading and saving
 data_dir = Path("D:/UCSF/macrophage_video_analysis/")
-nd2_dir = (data_dir / 'Exp3').resolve()
+nd2_dir = (data_dir / 'transwell_raw').resolve()
 output_dir = (data_dir / 'processed' / '8bit_tiffs').resolve()
 
 ## Get sample info
@@ -62,7 +62,7 @@ nd2_dirs, nd2_paths = find_all_filepaths(nd2_dir, '.nd2')
 lut = np.arange(2 ** 16, dtype='uint16')
 i = 0
 for nd2_path in nd2_paths:
-  print(str(i) + ' of ' + str(len(nd2_paths)))
+  print(str(i+1) + ' of ' + str(len(nd2_paths)))
   image = nd2.imread(nd2_path)
   if adaptive_thresh:
     for c in range(image.shape[1]):
@@ -76,8 +76,11 @@ for nd2_path in nd2_paths:
   if rearrange is not None:
     # axes are t,c,y,x
     image = image[np.ix_(np.arange(image.shape[0]),rearrange,np.arange(image.shape[2]),np.arange(image.shape[3]))]
-  this_sample_info = sample_info.loc[(sample_info['original_filename'] == Path(nd2_path).stem + '.nd2') &
-                                     (sample_info['old_subfolder'] == Path(nd2_path).parent.name)]
+
+  this_sample_info = sample_info.loc[(sample_info['original_filename'] == Path(nd2_path).stem + '.nd2')]
+  # if this_sample_info[] # I broke this logic here, I don't need it rn but apparently I did before. Needs to be fixed one day
+  # this_sample_info = sample_info.loc[(sample_info['original_filename'] == Path(nd2_path).stem + '.nd2') &
+  #                                    (sample_info['old_subfolder'] == Path(nd2_path).parent.name)]
   output_name = this_sample_info['new_filename'].values[0] + '.ome.tiff'
   print('saving ' + output_name)
   # OME-TIFF should be TZCYX (frustrating) I think these nd2 are already like that

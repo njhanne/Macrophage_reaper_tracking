@@ -498,7 +498,7 @@ csv_dirs, csv_paths = find_all_filepaths(xml_directory, '.csv')
 # this is so that using debug mode doesn't crash pycharm. It doesn't work with the parallelized processing, unforunately
 debug = False
 # this allows you to run the code and just calculate the overall cellularity w/o all the full analysis
-cellularity_only = True
+cellularity_only = False
 
 ## actually loop through and process the trackmate results
 for sample_name in sample_info['new_filename'].unique():
@@ -531,13 +531,14 @@ for sample_name in sample_info['new_filename'].unique():
     loaded = False # boolean to prevent 24 hr analysis if not loaded properly
 
     # we don't want to run it on the pairs twice, only look at the 24hr ones, also skip ones we want to skip
-    if this_sample_info['time'].values[0] == 24 and this_sample_info['skip'].values[0] != True:
-      # get the 48 hour counterpart
-      paired_sample_info = sample_info.loc[sample_info['new_filename_timeless'] == this_sample_info['new_filename_timeless'].values[0]]
-      if len(paired_sample_info) > 1: # only look at ones that actually have pairs
-        paired_sample_info = paired_sample_info[paired_sample_info['time'] == 48]
-        pair_video = True
-        paired_name = paired_sample_info['new_filename'].values[0]
+    if this_sample_info['skip'].values[0] != True:
+      if this_sample_info['time'].values[0] == 24:
+        # get the 48 hour counterpart
+        paired_sample_info = sample_info.loc[sample_info['new_filename_timeless'] == this_sample_info['new_filename_timeless'].values[0]]
+        if len(paired_sample_info) > 1: # only look at ones that actually have pairs
+          paired_sample_info = paired_sample_info[paired_sample_info['time'] == 48]
+          pair_video = True
+          paired_name = paired_sample_info['new_filename'].values[0]
 
       # load the xml files. We will do this first to make sure they load correctly. If not we won't run analysis...
       tmxml_path = [tm for tm in xml_paths if tm.parts[-1].startswith(this_sample_info['new_filename'].values[0] + '_')]
