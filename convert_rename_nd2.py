@@ -1,9 +1,11 @@
 from pathlib import Path
 import numpy as np
-import nd2 # allows opening of Nikon nd2 images
+import nd2 # allows opening of Nikon nd2 images, need install on pip
 # from nis2pyr.convertor import convert_nd2_to_pyramidal_ome_tiff # for converting Nikon image files
 from tifffile import imread, imwrite
 import pandas as pd
+
+import time
 
 import sys
 sys.path.append("./DirFileHelpers")
@@ -45,12 +47,17 @@ def adaptive_8bit(image, lut):
 ### MAIN ###
 # specify settings
 adaptive_thresh = False
-rearrange = None
-# rearrange = [1,2,0] # this is a little confusing, you put what channel from nd2 to be in 0,1,2 position
+# rearrange = None
+rearrange = [1,2,0] # this is a little confusing, you put what channel from nd2 to be in 0,1,2 position
+# we want red-green-grey
 
 ## set directories for loading and saving
-data_dir = Path("D:/UCSF/macrophage_video_analysis/")
-nd2_dir = (data_dir / 'transwell_raw').resolve()
+# data_dir = Path("D:/UCSF/macrophage_video_analysis/")
+# nd2_dir = (data_dir / 'transwell_raw').resolve()
+# output_dir = (data_dir / 'processed' / '8bit_tiffs').resolve()
+
+data_dir = Path("E:/Nicholas/")
+nd2_dir = (data_dir / '20250516_transwell_24well').resolve()
 output_dir = (data_dir / 'processed' / '8bit_tiffs').resolve()
 
 ## Get sample info
@@ -62,6 +69,7 @@ nd2_dirs, nd2_paths = find_all_filepaths(nd2_dir, '.nd2')
 lut = np.arange(2 ** 16, dtype='uint16')
 i = 0
 for nd2_path in nd2_paths:
+  tic = time.time()
   print(str(i+1) + ' of ' + str(len(nd2_paths)))
   image = nd2.imread(nd2_path)
   if adaptive_thresh:
@@ -77,14 +85,17 @@ for nd2_path in nd2_paths:
     # axes are t,c,y,x
     image = image[np.ix_(np.arange(image.shape[0]),rearrange,np.arange(image.shape[2]),np.arange(image.shape[3]))]
 
-  this_sample_info = sample_info.loc[(sample_info['original_filename'] == Path(nd2_path).stem + '.nd2')]
+  #TODO: handle multiple same name files, for now this just selects the last one
+  this_sample_info = sample_info.loc[(sample_info['original_filename'] == Path(nd2_path).stem + '.nd2')].iloc[-1]
   # if this_sample_info[] # I broke this logic here, I don't need it rn but apparently I did before. Needs to be fixed one day
   # this_sample_info = sample_info.loc[(sample_info['original_filename'] == Path(nd2_path).stem + '.nd2') &
   #                                    (sample_info['old_subfolder'] == Path(nd2_path).parent.name)]
-  output_name = this_sample_info['new_filename'].values[0] + '.ome.tiff'
+  output_name = this_sample_info['new_filename'] + '.ome.tiff'
   print('saving ' + output_name)
   # OME-TIFF should be TZCYX (frustrating) I think these nd2 are already like that
   output_path = Path(output_dir) / output_name
   imwrite(output_path, image, imagej=True, metadata = {'axes': 'TCYX'})
   i += 1
+  toc = time.time()
+  print(toc-tic)
   # convert_nd2_to_pyramidal_ome_tiff(image, output_path, max_levels = 1)
