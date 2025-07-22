@@ -43,7 +43,7 @@ def find_neighbors(label_mask, connectivity = 2, frames_to_add=0, debug = False)
       for slice in range(len(label_mask)):
         all_pairs[slice + frames_to_add] = find_touching_cells(label_mask[slice, :, :], connectivity = connectivity)
     else:
-      all_pairs_temp = Parallel(n_jobs=6)(delayed(find_touching_cells)(label_mask[slice, :, :], connectivity = connectivity) for slice in range(0, len(label_mask)))
+      all_pairs_temp = Parallel(n_jobs=8)(delayed(find_touching_cells)(label_mask[slice, :, :], connectivity = connectivity) for slice in range(0, len(label_mask)))
       all_pairs = {k+frames_to_add: all_pairs_temp[k] for k in range(len(all_pairs_temp))}
   return all_pairs
 
@@ -476,10 +476,18 @@ def link_cell_stats(cell_stats_24, cell_stats_48, csv_links):
 ### MAIN ###
 ## First find all needed directories and load them all up
 # data_dir = (Path.cwd() / 'data').resolve()
-data_dir = Path("D:/UCSF/macrophage_video_analysis/")
-results_dir = (data_dir / 'results' / 'tracks_csv').resolve()
-xml_directory = (data_dir / 'processed' / 'stabilized_tiffs').resolve()
+
+# home/old
+# data_dir = Path("D:/UCSF/macrophage_video_analysis/")
+# xml_directory = (data_dir / 'processed' / 'stabilized_tiffs').resolve()
+# lblimgs_directory = (data_dir / 'processed' / 'label_images').resolve()
+# results_dir = (data_dir / 'results' / 'tracks_csv').resolve()
+
+# workstation
+data_dir = Path("E:/Nicholas/")
+xml_directory = (data_dir / 'processed' / 'trackmate_output').resolve()
 lblimgs_directory = (data_dir / 'processed' / 'label_images').resolve()
+results_dir = (data_dir / 'results' / 'tracks_csv').resolve()
 
 ## Get sample info
 # I use a csv file with info on all the images to save/load sample info

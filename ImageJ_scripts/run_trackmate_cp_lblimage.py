@@ -25,10 +25,11 @@ from fiji.plugin.trackmate.util import LogRecorder
 from fiji.plugin.trackmate.io import TmXmlWriter
 from fiji.plugin.trackmate.util import TMUtils
 from fiji.plugin.trackmate import SelectionModel
-from fiji.plugin.trackmate.cellpose import CellposeDetectorFactory
+# from fiji.plugin.trackmate.cellpose import CellposeDetectorFactory
+from fiji.plugin.trackmate.detection import LabelImageDetectorFactory
 import fiji.plugin.trackmate.features.FeatureFilter as FeatureFilter
-from fiji.plugin.trackmate.cellpose.CellposeSettings import PretrainedModel
-from fiji.plugin.trackmate.action import LabelImgExporter
+# from fiji.plugin.trackmate.cellpose.CellposeSettings import PretrainedModel
+# from fiji.plugin.trackmate.action import LabelImgExporter
 import fiji.plugin.trackmate.action.LabelImgExporter.LabelIdPainting as LabelIdPainting
 
 # We have to do the following to avoid errors with UTF8 chars generated in
@@ -76,6 +77,10 @@ print(file_paths)
 def run(image_file):
   # Open image.
   imp = IJ.openImage(image_file)
+
+  # important here to change the pixel dimensions or we won't be able to easily change source image after it runs
+  # also we need to swap slices and frames. It WILL NOT work if this isn't done
+  IJ.run(imp, "Properties...", "channels=1 slices=1 frames=361 pixel_width=0.6500002 pixel_height=0.6500002 voxel_depth=1")
   cal = imp.getCalibration()
 
   # Logger -> content will be saved in the XML file.
@@ -95,15 +100,15 @@ def run(image_file):
 
   # Configure Cellpose default detector.
 
-  settings.detectorFactory = CellposeDetectorFactory()
+  settings.detectorFactory = LabelImageDetectorFactory()
 
-  settings.detectorSettings['TARGET_CHANNEL'] = 3
-  settings.detectorSettings['OPTIONAL_CHANNEL_2'] = 0
-  settings.detectorSettings['CELLPOSE_PYTHON_FILEPATH'] = "C:/Users/njhan/anaconda3/envs/Branches/python.exe"
-  settings.detectorSettings['CELLPOSE_MODEL'] = PretrainedModel.CUSTOM
-  settings.detectorSettings['CELLPOSE_MODEL_FILEPATH'] = "C:/Users/njhan/Box/macrophage_coculture/Cellpose_model/NH_LB_LC3_HL2"
-  settings.detectorSettings['CELL_DIAMETER'] = 52.0
-  settings.detectorSettings['USE_GPU'] = True
+  settings.detectorSettings['TARGET_CHANNEL'] = 1
+  # settings.detectorSettings['OPTIONAL_CHANNEL_2'] = 0
+  # settings.detectorSettings['CELLPOSE_PYTHON_FILEPATH'] = "C:/Users/njhan/anaconda3/envs/Branches/python.exe"
+  # settings.detectorSettings['CELLPOSE_MODEL'] = PretrainedModel.CUSTOM
+  # settings.detectorSettings['CELLPOSE_MODEL_FILEPATH'] = "C:/Users/njhan/Box/macrophage_coculture/Cellpose_model/NH_LB_LC3_HL2"
+  # settings.detectorSettings['CELL_DIAMETER'] = 52.0
+  # settings.detectorSettings['USE_GPU'] = True
   settings.detectorSettings['SIMPLIFY_CONTOURS'] = False
 
   # Configure tracker
@@ -136,11 +141,11 @@ def run(image_file):
   # filter2_spot = FeatureFilter('CIRCULARITY', 0.7, True)
   # settings.addSpotFilter(filter1_spot)
   # settings.addSpotFilter(filter2_spot)
-
-  print
-  "Spot filters added = ", settings.getSpotFilters()
-  print
-  "Track filters added = ", settings.getTrackFilters(), "\n"
+  #
+  # print
+  # "Spot filters added = ", settings.getSpotFilters()
+  # print
+  # "Track filters added = ", settings.getTrackFilters(), "\n"
 
   # -------------------
   # Instantiate plugin
@@ -176,13 +181,14 @@ def run(image_file):
   writer.appendModel(trackmate.getModel())
   writer.appendSettings(trackmate.getSettings())
   writer.writeToFile();
-  print("Results saved to: " + saveFile.toString() + '\n');
+  print("Results saved to: " + saveFile.toString() + '\n')
 
-  lblImg = LabelImgExporter()
-  lblImg.createLabelImagePlus(trackmate, False, False, LabelIdPainting.LABEL_IS_SPOT_ID, logger).show()
-  c = WindowManager.getCurrentImage()
-  IJ.save(c, "D:/UCSF/macrophage_video_analysis/processed/label_images/" + c.getTitle())
-  c.close()
+  # Don't need this as it already is a labelimg
+  # lblImg = LabelImgExporter()
+  # lblImg.createLabelImagePlus(trackmate, False, False, LabelIdPainting.LABEL_IS_SPOT_ID, logger).show()
+  # c = WindowManager.getCurrentImage()
+  # IJ.save(c, "E:/Nicholas/processed/trackmate_outputs/" + c.getTitle())
+  # c.close()
 
   # ----------------
   # Display results
