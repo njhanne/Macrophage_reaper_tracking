@@ -38,7 +38,7 @@ forget it O/N and it does fine.
   - UCSF is getting a supercompute cluster with GPUs, but not too soon.
 - Currently the trackmate xml is converted into pandas which is kind of a pain to work with. The pandas file is then 
 saved as a csv for import into R, which introduces even bigger proglems. R has a big problem with empty frames, lists inside
-of cells, and many more. Basically pandas and R are not supposed to work with this kind of data so htere are a lot of hacky
+of cells, and many more. Basically pandas and R are not supposed to work with this kind of data so there are a lot of hacky
 workarounds in the code that obfuscate what I am doing and make complex what should be simple.
   - A workaround would be to not condense all the data but then the R steps will take a VERY long time and the file sizes
   will be large. I think this is a bad idea.
@@ -57,6 +57,13 @@ rearranges the order of the channels so that they are macrophage(red):apoptosis(
   - Setting the order of the channels needs to be changed manually in the script with the 'rearrange' variable. The images 
   were taken in 3 batches and each batch has a different order of channels.
   - There is a imagej script called 'convert_8bit.ijm' that will convert 16bit to 8bit if you want, too.
+
+The imaging core has updated the computer controlling the time-lapse camera. The new computer does not have the Nikon 
+software but instead [Micromanager](https://micro-manager.org/), which tbh seems like an improvement. It saves the images as .ome.tiff so no need to convert
+anymore, but will steel need to downsample to 8bit. 
+
+#### Stitch tiled images
+Unfortunately, Micromanager does not stitch automatically so that will need to be incorporated here.
 
 #### Background correction for NucView channel
 ImageJ script 'BG_correct_TUNEL.ijm' runs the background correction command on the apoptosis fluor. This channel is signal
