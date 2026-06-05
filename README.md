@@ -59,11 +59,16 @@ rearranges the order of the channels so that they are macrophage(red):apoptosis(
   - There is a imagej script called 'convert_8bit.ijm' that will convert 16bit to 8bit if you want, too.
 
 The imaging core has updated the computer controlling the time-lapse camera. The new computer does not have the Nikon 
-software but instead [Micromanager](https://micro-manager.org/), which tbh seems like an improvement. It saves the images as .ome.tiff so no need to convert
-anymore, but will steel need to downsample to 8bit. 
+software but instead [Micromanager](https://micro-manager.org/), which tbh seems like an improvement. It saves the images as .ome.tiff so no
+need to convert anymore, but will still need to downsample to 8bit. 
 
 #### Stitch tiled images
 Unfortunately, Micromanager does not stitch automatically so that will need to be incorporated here.
+
+The bigstitcher plugin seems overkill and over complicated. The tile stitching works fine and is way faster.
+Will convert to 8bit here.
+
+doing them 1st timepoint and using config files takes about 60s to load each image and 200s to tile
 
 #### Background correction for NucView channel
 ImageJ script 'BG_correct_TUNEL.ijm' runs the background correction command on the apoptosis fluor. This channel is signal

@@ -29,6 +29,7 @@ output_directory = (data_dir / 'cellpose_output').resolve()
 cuda = True
 
 # parameterize cellpose however you like
+# cellpose needs c z y x
 model_kwargs = {'gpu': cuda, 'pretrained_model': str(model_path)}  # can also use 'pretrained_model'
 eval_kwargs = {'stitch_threshold': 1.0,
                'z_axis': 0,

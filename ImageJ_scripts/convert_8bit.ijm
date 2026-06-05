@@ -27,6 +27,9 @@ for (i = 0; i < lengthOf(fileList); i++) {
             setOption("ScaleConversions", true);
             run("8-bit");
 
+Get-ChildItem -Directory | ForEach-Object { Move-Item "$($_.FullName)\*" -Destination . }
+
+
             saveAs("tiff", current_imagePath);
         }
         // make sure to close every images before opening the next one

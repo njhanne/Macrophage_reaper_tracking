@@ -11,12 +11,14 @@ from DirFileHelpers.find_all_files import find_all_filepaths
 
 ### main ###
 # load in all the needed files and paths
-data_dir = (Path.cwd() / 'data' / 'processed').resolve()
+# data_dir = (Path.cwd() / 'data' / 'processed').resolve()
+data_dir = (Path.cwd() / 'data' / '20260304' / 'Timelapse_1').resolve()
+
 # get all the stacks we created from rgb_to_stack.py
-image_directory = (data_dir / 'BG_corrected' / 'run').resolve()
+image_directory = (data_dir / 'BG_combined').resolve()
 image_dirs, images = find_all_filepaths(image_directory, '.tif')
 # find the cellpose models that Charlie helped train
-model_path = (Path.cwd().parent.parent / '.cellpose' / 'models' / 'NH_LB_LC4_HL1_3chan').resolve()
+model_path = (data_dir / 'train' / 'models' / 'NH_LB_LC5_HL_3chan').resolve()
 # where to save the cellpose output
 output_directory = (data_dir / 'cellpose_output').resolve()
 

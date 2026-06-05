@@ -210,7 +210,7 @@ samples_to_load <- c(samples_to_load, combined_csvs)
 # of them every time, the code is quite slow
 setwd('../.')
 completed_batches <- list.files(pattern = ".Rda$")
-batch_nums_to_load <- c('1', '2', '3', '4')
+batch_nums_to_load <- c('5', '6')
 completed_batch_nums <- str_extract(completed_batches, '(?<=batch_)(.*)(?=.Rda)', group=1)
 batches_to_load <- list()
 for (batch_num in batch_nums_to_load) {
@@ -233,11 +233,11 @@ samples_to_load <- samples_to_load[samples_to_keep]
 #### 0.2.2 Load new batches ####
 setwd('./tracks_csv/')
 
-batch_nums_to_analyze <- c('5')
+batch_nums_to_analyze <- c('6')
 for (batch_num in batch_nums_to_analyze) {
   # get all the filenames, add in the underscore, and remove the first match which is NA
   batch_samples <- str_c(unique(sample_info[sample_info$processing_batch == batch_num,]$new_filename_timeless), '_')[-1] 
-  batch_samples_bool <- str_detect(str_c(batch_samples, collapse='|'), str_remove(samples_to_load, '.csv'))
+  batch_samples_bool <- str_detect(str_remove(samples_to_load, '.csv'), str_c(batch_samples, collapse='|'))
   batch_samples <- samples_to_load[batch_samples_bool]
   
   # load the csvs and rbind them into a df, this is slow!
@@ -309,6 +309,10 @@ for (sample_num in 1:length(unique(df_childless$id_col))) {
 df_childless <- df_childless %>% mutate(first_mac_touch = case_when(str_detect(id_col, 'TW1_') ~ NA, TRUE ~ first_mac_touch))
 df_childless <- df_childless %>% mutate(reaper_time = case_when(str_detect(id_col, 'TW1_') ~ NA, TRUE ~ reaper_time))
 df_childless <- df_childless %>% mutate(reaper_time = case_when(str_detect(id_col, 'TW1_') ~ NA, TRUE ~ reaper_time))
+
+df_childless <- df_childless %>% mutate(first_mac_touch = case_when(str_detect(id_col, 'TW2_atdc5_oc_trans_') ~ NA, TRUE ~ first_mac_touch))
+df_childless <- df_childless %>% mutate(reaper_time = case_when(str_detect(id_col, 'TW2_atdc5_oc_trans_') ~ NA, TRUE ~ reaper_time))
+df_childless <- df_childless %>% mutate(reaper_time = case_when(str_detect(id_col, 'TW2_atdc5_oc_trans_') ~ NA, TRUE ~ reaper_time))
 
 
 ### does touching make them die?
@@ -407,13 +411,20 @@ for (sample_id in 1:length(unique(df_childless$id_col))) {
 
 # cleanup the compiled data
 compiled_results_df <- compiled_results_df %>% mutate(cell_type = case_when(grepl('TW1_atdc5_oc', sample) ~ 'transwell_coculture',
+                                                                            grepl('TW2_atdc5_oc_trans', sample) ~ 'transwell_coculture',
                                                                             grepl('atdc5_oc', sample) ~ 'ATDC5_coculture',
                                                                             grepl('callus_oc', sample) ~ 'Callus_coculture',
-                                                                            grepl('TW1_atdc5', sample) ~ 'transwell_ATDC5',
+                                                                            #grepl('TW1_atdc5', sample) ~ 'transwell_ATDC5',
                                                                             grepl('atdc5', sample) ~ 'ATDC5',
                                                                             grepl('callus', sample) ~ 'Callus',
                                                                             grepl('oc', sample) ~ 'Osteoclasts',
                                                                             TRUE ~ 'Other'))
+
+compiled_results_df <- compiled_results_df %>% mutate(batch = case_when(grepl('TW1_', sample) ~ 1,
+                                                                            grepl('TW2_', sample) ~ 2))
+compiled_results_df$batch <- as.factor(compiled_results_df$batch)
+
+compiled_results_df <- compiled_results_df %>% mutate(across(everything(), ~replace(.x, is.nan(.x), 0)))
 
 
 # add data from info_csv into our compiled results
@@ -422,6 +433,7 @@ compiled_results_df <- left_join(compiled_results_df, compiled_confluence_df)
 
 ### Graph helping ###
 pal <- c('#cc3311', '#bbbbbb', '#ee7733', '#0077bb', '#33bbee', '#cc3311')
+pal <- c('#cc3311', '#bbbbbb', '#ee7733', '#ab3377')
 
 
 # # test different confluence calcs
@@ -533,16 +545,18 @@ pal <- c('#cc3311', '#bbbbbb', '#ee7733', '#0077bb', '#33bbee', '#cc3311')
 ### Death analysis
 # dying ratio by cell
 # these two are used
-compiled_results_df$cell_type <- factor(compiled_results_df$cell_type, levels=c('Osteoclasts', 'ATDC5', 'ATDC5_coculture', 'Callus_coculture', 'transwell_coculture', 'transwell_ATDC5'))
+# compiled_results_df$cell_type <- factor(compiled_results_df$cell_type, levels=c('Osteoclasts', 'ATDC5', 'ATDC5_coculture', 'Callus_coculture', 'transwell_coculture', 'transwell_ATDC5'))
+compiled_results_df$cell_type <- factor(compiled_results_df$cell_type, levels=c('Osteoclasts', 'ATDC5', 'ATDC5_coculture', 'transwell_coculture'))
 
-ggplot(data=compiled_results_df, aes(x=cell_type, y = dying_ratio*100, fill = cell_type)) +
+
+ggplot(data=compiled_results_df, aes(x=cell_type, y = dying_ratio*100, fill = cell_type, shape=batch)) +
   geom_bar(stat='summary', fun='mean') + 
-  geom_jitter( width=0.1) +
+  geom_jitter( width=0.1, size=4, aes(shape=batch)) +
   ylab('Relative apoptosis (% of cells)') +
   scale_fill_manual(values=pal)
 
-ggplot(data=compiled_results_df, aes(x = total_cells, y = dying_ratio*100, color = cell_type)) +
-  geom_point() +
+ggplot(data=compiled_results_df, aes(x = total_cells, y = dying_ratio*100, color = cell_type, shape=batch)) +
+  geom_point(size=4, aes(shape=batch)) +
   geom_smooth(method=lm, se=FALSE, fullrange=FALSE) +
   ylab('Relative apoptosis (% of cells)') +
   xlab('Total number of cells ~ confluency') +
@@ -589,21 +603,22 @@ t.test(ratio ~ cell_type, data=reaper_results_tall, paired = TRUE, alternative =
 
 
 # reap vs never touched mac and dies ## primary result ##
-reaper_results_tall <- compiled_results_df[c(1,13,14)] %>% pivot_longer(cols = 2:3, names_to = 'cell_type', values_to = 'ratio')
+reaper_results_tall <- compiled_results_df[c(1,13,14,20)] %>% pivot_longer(cols = 2:3, names_to = 'cell_type', values_to = 'ratio')
 reaper_results_tall <- reaper_results_tall %>% mutate(reap_type = case_when(cell_type == 'reaped_ratio' ~ "reaped",
                                                                             cell_type == 'touched_not_mac_dying_ratio' ~ 'not reaped'))
-reaper_results_tall <- reaper_results_tall %>% mutate(cell_type = case_when(grepl('TW1_atdc5_oc', sample) ~ 'ATDC5_transwell_coculture',
+reaper_results_tall <- reaper_results_tall %>% mutate(cell_type = case_when(grepl('TW1_atdc5_oc', sample) ~ 'transwell_coculture',
+                                                                            grepl('TW2_atdc5_oc_trans', sample) ~ 'transwell_coculture',
                                                                             grepl('atdc5_oc', sample) ~ 'ATDC5_coculture',
                                                                             grepl('callus_oc', sample) ~ 'Callus_coculture',
-                                                                            grepl('TW1_atdc5', sample) ~ 'ATDC5_transwell',
                                                                             grepl('atdc5', sample) ~ 'ATDC5',
-                                                                            grepl('callus_oc', sample) ~ 'Osteoclasts_coculture',
-                                                                            grepl('atdc5_oc', sample) ~ 'Osteoclasts_coculture',
                                                                             grepl('oc', sample) ~ 'Osteoclasts',
                                                                             TRUE ~ 'Other'))
 
 
-reaper_results_tall$cell_type <- factor(reaper_results_tall$cell_type, levels=c('Osteoclasts', 'ATDC5', 'ATDC5_coculture', 'Callus_coculture', 'ATDC5_transwell_coculture', 'ATDC5_transwell'))
+reaper_results_tall$cell_type <- factor(reaper_results_tall$cell_type, levels=c('Osteoclasts', 'ATDC5', 'ATDC5_coculture', 'Callus_coculture', 'transwell_coculture'))
+
+
+
 
 ggplot(data=reaper_results_tall, aes(cell_type, ratio*100, alpha=reap_type, fill=cell_type)) +
   geom_bar(position='dodge', stat = "summary", fun = "mean") +
@@ -611,6 +626,8 @@ ggplot(data=reaper_results_tall, aes(cell_type, ratio*100, alpha=reap_type, fill
   ylab('% of cells') +
   scale_fill_manual(values=pal) +
   scale_alpha_manual(values=c(.66, 1))
+
+
 
 for (group_i in 1:length(levels(reaper_results_tall$cell_type))) {
   temp_df <- reaper_results_tall %>% filter(cell_type == levels(reaper_results_tall$cell_type)[group_i])
@@ -679,29 +696,46 @@ for (i in 1:nrow(cell_reaper_probs)) {
     cell_reaper_probs[i, 'mac_reaper_ratio'] <- cell_reaper_probs[i, 'mac_reap_count'] / cell_reaper_probs[i, 'mac_touch_count']
     cell_reaper_probs[i, 'notmac_reaper_ratio'] <- 0
   }
+  else if (grepl('oc_trans', cell_reaper_probs[i, 'id_col'])) {
+    cell_reaper_probs[i, 'mac_reap_count'] <-  cell_reaper_probs[i, 'notmac_reap_count'] +  cell_reaper_probs[i, 'mac_reap_count']
+    cell_reaper_probs[i, 'notmac_reap_count'] <- 0
+    cell_reaper_probs[i, 'mac_touch_count'] <-  cell_reaper_probs[i, 'notmac_touch_count'] +  cell_reaper_probs[i, 'mac_touch_count']
+    cell_reaper_probs[i, 'notmac_touch_count'] <- 0
+    cell_reaper_probs[i, 'mac_reaper_ratio'] <- cell_reaper_probs[i, 'mac_reap_count'] / cell_reaper_probs[i, 'mac_touch_count']
+    cell_reaper_probs[i, 'notmac_reaper_ratio'] <- 0
+  }
 }
 
 
 cell_reaper_probs_tall <- cell_reaper_probs[c(1,6,7)] %>% pivot_longer(cols = 2:3, names_to = 'reap_type', values_to = 'reaper_prob')
 
-cell_reaper_probs_tall <- cell_reaper_probs_tall %>% mutate(cell_type = case_when(reap_type == 'mac_reaper_ratio' & grepl('TW1_atdc5_oc', id_col) ~ 'ATDC5_transwell_coculture',
-                                                                                  reap_type == 'mac_reaper_ratio' & grepl('atdc5_oc', id_col) ~ 'ATDC5_coculture',
-                                                                                  reap_type == 'mac_reaper_ratio' & grepl('TW1_atdc5', id_col) ~ 'ATDC5_transwell',
-                                                                                  reap_type == 'mac_reaper_ratio' & grepl('atdc5', id_col) ~ 'ATDC5',
-                                                                                  reap_type == 'mac_reaper_ratio' & grepl('callus_oc', id_col) ~ 'Callus_coculture',
-                                                                                  reap_type == 'mac_reaper_ratio' & grepl('oc', id_col) ~ 'Osteoclasts',
-                                                                                  reap_type == 'notmac_reaper_ratio' & grepl('TW1_atdc5_oc', id_col) ~ 'ATDC5_transwell_coculture',
-                                                                                  reap_type == 'notmac_reaper_ratio' & grepl('atdc5_oc', id_col) ~ 'ATDC5_coculture',
-                                                                                  reap_type == 'notmac_reaper_ratio' & grepl('TW1_atdc5', id_col) ~ 'ATDC5_transwell',
-                                                                                  reap_type == 'notmac_reaper_ratio' & grepl('atdc5', id_col) ~ 'ATDC5',
-                                                                                  reap_type == 'notmac_reaper_ratio' & grepl('callus_oc', id_col) ~ 'Callus_coculture',
-                                                                                  reap_type == 'notmac_reaper_ratio' & grepl('oc', id_col) ~ 'Osteoclasts',
-                                                                                  TRUE ~ 'Other'))
+# cell_reaper_probs_tall <- cell_reaper_probs_tall %>% mutate(cell_type = case_when(reap_type == 'mac_reaper_ratio' & grepl('TW1_atdc5_oc', id_col) ~ 'ATDC5_transwell_coculture',
+#                                                                                   reap_type == 'mac_reaper_ratio' & grepl('atdc5_oc', id_col) ~ 'ATDC5_coculture',
+#                                                                                   reap_type == 'mac_reaper_ratio' & grepl('TW1_atdc5', id_col) ~ 'ATDC5_transwell',
+#                                                                                   reap_type == 'mac_reaper_ratio' & grepl('atdc5', id_col) ~ 'ATDC5',
+#                                                                                   reap_type == 'mac_reaper_ratio' & grepl('callus_oc', id_col) ~ 'Callus_coculture',
+#                                                                                   reap_type == 'mac_reaper_ratio' & grepl('oc', id_col) ~ 'Osteoclasts',
+#                                                                                   reap_type == 'notmac_reaper_ratio' & grepl('TW1_atdc5_oc', id_col) ~ 'ATDC5_transwell_coculture',
+#                                                                                   reap_type == 'notmac_reaper_ratio' & grepl('atdc5_oc', id_col) ~ 'ATDC5_coculture',
+#                                                                                   reap_type == 'notmac_reaper_ratio' & grepl('TW1_atdc5', id_col) ~ 'ATDC5_transwell',
+#                                                                                   reap_type == 'notmac_reaper_ratio' & grepl('atdc5', id_col) ~ 'ATDC5',
+#                                                                                   reap_type == 'notmac_reaper_ratio' & grepl('callus_oc', id_col) ~ 'Callus_coculture',
+#                                                                                   reap_type == 'notmac_reaper_ratio' & grepl('oc', id_col) ~ 'Osteoclasts',
+#                                                                                   TRUE ~ 'Other'))
+
+cell_reaper_probs_tall <- cell_reaper_probs_tall %>% mutate(cell_type = case_when(grepl('TW1_atdc5_oc', id_col) ~ 'transwell_coculture',
+                                                                                            grepl('TW2_atdc5_oc_trans', id_col) ~ 'transwell_coculture',
+                                                                                            grepl('atdc5_oc', id_col) ~ 'ATDC5_coculture',
+                                                                                            grepl('callus_oc', id_col) ~ 'Callus_coculture',
+                                                                                            grepl('atdc5', id_col) ~ 'ATDC5',
+                                                                                            grepl('oc', id_col) ~ 'Osteoclasts',
+                                                                                            TRUE ~ 'Other'))
 
 
-cell_reaper_probs_tall$cell_type <- factor(cell_reaper_probs_tall$cell_type, levels=c('Osteoclasts', 'ATDC5', 'ATDC5_coculture', 'Callus_coculture', 'ATDC5_transwell_coculture', 'ATDC5_transwell'))
+# cell_reaper_probs_tall$cell_type <- factor(cell_reaper_probs_tall$cell_type, levels=c('Osteoclasts', 'ATDC5', 'ATDC5_coculture', 'Callus_coculture', 'ATDC5_transwell_coculture', 'ATDC5_transwell'))
+cell_reaper_probs_tall$cell_type <- factor(cell_reaper_probs_tall$cell_type, levels=c('Osteoclasts', 'ATDC5', 'ATDC5_coculture', 'transwell_coculture'))
 cell_reaper_probs_tall$reap_type <- factor(cell_reaper_probs_tall$reap_type)
-levels(cell_reaper_probs_tall$reap_type) <- c('Not OC Reaper', 'Osteoclast Reaper')
+
 
 ggplot(data=cell_reaper_probs_tall, aes(cell_type, reaper_prob*100, alpha=reap_type, fill=cell_type)) +
   geom_bar(position='dodge', stat = "summary", fun = "mean") +

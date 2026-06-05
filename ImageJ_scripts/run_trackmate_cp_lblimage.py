@@ -64,7 +64,7 @@ channel_to_process = 3
 # Image files to analyse.
 # directory_to_process = os.path.normpath("C:/Users/njhan/Box/macrophage_coculture/processed/stabilized_tiffs")
 # directory_to_process = os.path.normpath("D:/UCSF/macrophage_video_analysis/processed/stabilized_tiffs/test")
-directory_to_process = os.path.normpath("E:/Nicholas/processed/cellpose_output/run")
+directory_to_process = os.path.normpath("E:/Nicholas/20260304/Timelapse_1/cellpose_output")
 
 
 file_paths = find_all_filepaths(directory_to_process, '.tif')
@@ -80,7 +80,8 @@ def run(image_file):
 
   # important here to change the pixel dimensions or we won't be able to easily change source image after it runs
   # also we need to swap slices and frames. It WILL NOT work if this isn't done
-  IJ.run(imp, "Properties...", "channels=1 slices=1 frames=361 pixel_width=0.6500002 pixel_height=0.6500002 voxel_depth=1")
+  # IJ.run(imp, "Properties...", "channels=1 slices=1 frames=361 pixel_width=0.6500002 pixel_height=0.6500002 voxel_depth=1")
+  IJ.run(imp, "Properties...", "channels=1 slices=1 frames=361")
   cal = imp.getCalibration()
 
   # Logger -> content will be saved in the XML file.
